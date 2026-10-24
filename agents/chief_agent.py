@@ -2,6 +2,8 @@ from agents.research_agent import ResearchAgent
 from agents.builder_agent import BuilderAgent
 from agents.career_agent import CareerAgent
 from agents.learning_agent import LearningAgent
+from agents.project_manager_agent import ProjectManagerAgent
+
 
 class ChiefAgent:
 
@@ -10,6 +12,7 @@ class ChiefAgent:
         self.builder = BuilderAgent()
         self.career = CareerAgent()
         self.learning = LearningAgent()
+        self.project_manager = ProjectManagerAgent()
 
     def run(self, task):
 
@@ -26,6 +29,9 @@ class ChiefAgent:
 
         elif "learn" in task:
             return self.learning.run(task)
+
+        elif "project" in task:
+            return self.project_manager.create_plan(task)
 
         else:
             return "Task not recognized."

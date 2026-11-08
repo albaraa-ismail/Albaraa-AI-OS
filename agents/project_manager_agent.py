@@ -1,32 +1,13 @@
 class ProjectManagerAgent:
-
-    def run(self, task):
-        return f"Project plan created: {task}"
-
-    def create_plan(self, project_name):
-
-        plan = f"""
-Project: {project_name}
-
-Phase 1:
-- Requirements Analysis
-- Research
-
-Phase 2:
-- System Design
-- Architecture Planning
-
-Phase 3:
-- Development
-- Testing
-
-Phase 4:
-- Documentation
-- Deployment
-
-Phase 5:
-- Maintenance
-- Future Improvements
-"""
-
-        return plan
+    def __init__(self):
+        self.name = "وكيل الحوكمة والتشريعات"
+        
+    def audit_results(self, web_results, constraints):
+        approved = []
+        blocked = []
+        for tool in web_results:
+            if tool["type"] == "Free":
+                approved.append(tool)
+            else:
+                blocked.append({"name": tool["name"], "reason": "محجوب: أداة مدفوعة مخالفة لشروط المسودة"})
+        return approved, blocked

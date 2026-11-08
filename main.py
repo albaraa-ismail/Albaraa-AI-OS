@@ -1,59 +1,82 @@
 import os
 import json
 
-class AlbaraaAiOS:
+# استدعاء الوكلاء الستة المطورين من مجلد agents
+from agents.chief_agent import ChiefAgent
+from agents.research_agent import ResearchAgent
+from agents.builder_agent import BuilderAgent
+from agents.project_manager_agent import ProjectManagerAgent
+from agents.learning_agent import LearningAgent
+from agents.career_agent import CareerAgent
+
+class MultiAgentSystem:
     def __init__(self):
-        self.name = "Albaraa-Ai-os"
+        # تهيئة الوكلاء
+        self.chief = ChiefAgent()
+        self.research = ResearchAgent()
+        self.builder = BuilderAgent()
+        self.governance = ProjectManagerAgent()
+        self.trainer = LearningAgent()
+        self.exporter = CareerAgent()
         
-    def execute_system_task(self, user_query, draft_constraints):
-        print(f"[{self.name}] جاري استقبال الطلب وتحليله بناءً على مسودة الشروط...")
+    def run_live_demo(self, query, constraints):
+        print("\n==========================================")
+        print("🚀 [النظام] جاري تشغيل بيئة المحاكاة الحية لـ Albaraa-Ai-os")
+        print("==========================================\n")
         
-        # محاكاة عمل وكيل البحث لتنقيح الاستعلام ديناميكياً
-        refined_query = user_query + " + open-source github repository + free tier"
-        print(f"[{self.name}] تم تنقيح الاستعلام بواسطة وكيل البحث إلى: {refined_query}")
+        # 1. القائد يستقبل المهمة
+        init_status = self.chief.orchestrate_task(query, constraints)
+        print(f"-> {init_status['orchestrator']}: استلمت الطلب وبدأت التوجيه.\n")
         
-        # محاكاة مصفوفة مخرجات الويب ليفحصها وكيل الحوكمة والتشريعات (النظام الخبير)
-        mock_web_results = [
-            {"name": "GitHub Copilot", "type": "Paid", "status": "Premium Subscription"},
-            {"name": "Replit Agent", "type": "Paid", "status": "Usage Quota Limits"},
-            {"name": "VS Code Core", "type": "Free", "status": "Open Source Community"},
-            {"name": "Ollama Local LLM", "type": "Free", "status": "MIT License - Open Source"}
+        # 2. وكيل البحث ينقح الاستعلام ديناميكياً
+        refined = self.research.refine_query(query, constraints)
+        print(f"-> {self.research.name}: تم تنقيح وتوسيع الاستعلام إلى: '{refined}'\n")
+        
+        # 3. مصفوفة بيانات تجريبية (مفتوح ومغلق المصدر / مجاني ومدفوع)
+        mock_web_data = [
+            {"name": "GitHub Copilot", "type": "Paid"},
+            {"name": "VS Code Core", "type": "Free"},
+            {"name": "Ollama Local LLM", "type": "Free"},
+            {"name": "Replit Agent", "type": "Paid"}
         ]
         
-        approved_tools = []
-        blocked_tools = []
+        # 4. وكيل الحوكمة يفحص الامتثال (النظام الخبير)
+        approved, blocked = self.governance.audit_results(mock_web_data, constraints)
+        print(f"-> {self.governance.name}: جاري تطبيق فلاتر الحوكمة الصارمة...")
+        print(f"   [✓] الأدوات المعتمدة: {[t['name'] for t in approved]}")
+        print(f"   [X] الأدوات المحجوبة: {[t['name'] for t in blocked]}\n")
         
-        # تطبيق منطق النظم الخبيرة (If-Then Rules)
-        for tool in mock_web_results:
-            if tool["type"] == "Free":
-                approved_tools.append(tool)
-            else:
-                blocked_tools.append({
-                    "name": tool["name"],
-                    "reason": "حظر تلقائي: الأداة مدفوعة وتخالف بنود الامتثال الرقمي للمسودة المعتمدة."
-                })
+        # 5. وكيل المطور يولد الهيكلية
+        build_log = self.builder.generate_code_structure("AI Agent Framework")
+        print(f"-> {self.builder.name}: {build_log}\n")
         
-        # تجهيز التقرير النهائي للذاكرة المشتركة
-        final_report = {
-            "orchestrator": self.name,
-            "compliance_status": "PASSED" if len(approved_tools) > 0 else "FAILED",
-            "approved_dependencies": approved_tools,
-            "blocked_dependencies": blocked_tools,
-            "formatting": "مطابق لمعايير المؤسسة العامة للتدريب التقني والمهني"
+        # 6. وكيل التطبيقات يصدر التقرير النهائي
+        report_log = self.exporter.export_report(approved)
+        print(f"-> {self.exporter.name}: {report_log}")
+        
+        # 7. مدرب الأنظمة يقيم جودة العملية بالكامل
+        eval_log = self.trainer.evaluate_performance("Execution OK")
+        print(f"-> {self.trainer.name}: تم الفحص. الدقة المحققة: {eval_log['accuracy']}\n")
+        
+        # حفظ السجل النهائي في الذاكرة المشتركة
+        final_output = {
+            "system": "Albaraa-Ai-os",
+            "approved": approved,
+            "blocked": blocked,
+            "evaluation": eval_log
         }
-        
-        # حفظ السجل في الذاكرة المشتركة للمشروع
         os.makedirs("shared_memory", exist_ok=True)
         with open("shared_memory/project_draft.txt", "w", encoding="utf-8") as f:
-            json.dump(final_report, f, ensure_ascii=False, indent=4)
+            json.dump(final_output, f, ensure_ascii=False, indent=4)
             
-        return final_report
+        print("==========================================")
+        print("💾 [النظام] تم حفظ تقرير العمليات بنجاح في shared_memory/project_draft.txt")
+        print("==========================================")
 
 if __name__ == "__main__":
-    os_system = AlbaraaAiOS()
-    query = "البحث عن أدوات ذكاء اصطناعي لتطوير الأكواد وتصميم واجهات النظام"
-    constraints = "يجب استبعاد أي أداة مدفوعة الثمن، والالتزام فقط بالمكتبات المجانية ومفتوحة المصدر"
+    # تشغيل السيناريو الفعلي المطابق لشروط تخرجك وهدفك التجاري
+    os_system = MultiAgentSystem()
+    user_query = "البحث عن أدوات ذكاء اصطناعي لبناء المنصة وتوليد الأكواد"
+    user_constraints = "يجب الالتزام بالأدوات المجانية ومفتوحة المصدر فقط واستبعاد المدفوع"
     
-    result = os_system.execute_system_task(query, constraints)
-    print("\n=== التقرير النهائي المعتمد للمنظومة ===")
-    print(json.dumps(result, ensure_ascii=False, indent=4))
+    os_system.run_live_demo(user_query, user_constraints)

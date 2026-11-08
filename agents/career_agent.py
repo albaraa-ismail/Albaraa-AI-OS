@@ -1,4 +1,6 @@
 class CareerAgent:
-
-    def run(self, task):
-        return f"Career advice: {task}"
+    def __init__(self):
+        self.name = "وكيل تطبيقات الحاسب المتقدمة"
+        
+    def export_report(self, data):
+        return f"=== تقرير الإنتاجية النهائي الصادر عن {self.name} ==="

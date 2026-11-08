@@ -1,37 +1,15 @@
-from agents.research_agent import ResearchAgent
-from agents.builder_agent import BuilderAgent
-from agents.career_agent import CareerAgent
-from agents.learning_agent import LearningAgent
-from agents.project_manager_agent import ProjectManagerAgent
-
+import os
+import json
 
 class ChiefAgent:
-
     def __init__(self):
-        self.research = ResearchAgent()
-        self.builder = BuilderAgent()
-        self.career = CareerAgent()
-        self.learning = LearningAgent()
-        self.project_manager = ProjectManagerAgent()
-
-    def run(self, task):
-
-        task = task.lower()
-
-        if "research" in task:
-            return self.research.run(task)
-
-        elif "build" in task:
-            return self.builder.run(task)
-
-        elif "career" in task:
-            return self.career.run(task)
-
-        elif "learn" in task:
-            return self.learning.run(task)
-
-        elif "project" in task:
-            return self.project_manager.create_plan(task)
-
-        else:
-            return "Task not recognized."
+        self.name = "Albaraa-Ai-os (Chief)"
+        
+    def orchestrate_task(self, query, constraints):
+        print(f"[{self.name}] بدء استقبال الطلب وحوكمته...")
+        return {
+            "status": "active",
+            "orchestrator": self.name,
+            "query": query,
+            "constraints": constraints
+        }

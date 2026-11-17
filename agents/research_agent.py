@@ -2,6 +2,7 @@ class ResearchAgent:
     def __init__(self):
         self.name = "وكيل البحث الذكي"
         
+    # تحسين وتوسيع الاستعلام بناء على الشروط
     def refine_query(self, base_query, constraints):
         refined = base_query
         if "مفتوحة المصدر" in constraints:

@@ -1,4 +1,4 @@
-import os, requests, base64, json, time, openpyxl
+import os, requests, base64, json, time, threading, openpyxl
 from pptx import Presentation
 from pptx.util import Pt
 from flask import Flask, request, jsonify
@@ -6,6 +6,7 @@ from main import MultiAgentSystem
 
 app = Flask(__name__)
 ai_os = MultiAgentSystem()
+PROCESSED_IDS = set()
 
 G_ID = os.environ.get("GREEN_API_ID", "").strip()
 G_TOK = os.environ.get("GREEN_API_TOKEN", "").strip()
@@ -27,8 +28,8 @@ def sb_req(method, table, payload=None, query=""):
         r = requests.get(url, headers=h, timeout=10) if method == "GET" else requests.post(url, json=payload, headers=h, timeout=10)
         if r.status_code in (200, 201):
             return r.json()
-    except Exception as e:
-        print("SB:", e, flush=True)
+    except Exception:
+        pass
     return list()
 
 def call_groq(prompt, sys_role):
@@ -36,7 +37,7 @@ def call_groq(prompt, sys_role):
     h = {"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"}
     body = {"model": "llama-3.3-70b-versatile", "messages": ({"role": "system", "content": sys_role}, {"role": "user", "content": prompt})}
     try:
-        r = requests.post(url, json=body, headers=h, timeout=30)
+        r = requests.post(url, json=body, headers=h, timeout=25)
         if r.status_code == 200:
             return r.json().get("choices", list()).pop(0).get("message", {}).get("content", "").strip()
     except Exception:
@@ -47,7 +48,7 @@ def call_gemini(prompt):
     base = dec("aHR0cHM6Ly9nZW5lcmF0aXZlbGFuZ3VhZ2UuZ29vZ2xlYXBpcy5jb20vdjFiZXRhL21vZGVscw==")
     url = f"{base}/gemini-2.5-flash:generateContent?key={GEM_KEY}"
     try:
-        r = requests.post(url, json={"contents": ({"parts": ({"text": prompt},)},)}, timeout=30)
+        r = requests.post(url, json={"contents": ({"parts": ({"text": prompt},)},)}, timeout=25)
         if r.status_code == 200:
             c = r.json().get("candidates", list())
             if c:
@@ -59,10 +60,10 @@ def call_gemini(prompt):
 def call_or(prompt, draft, lessons=""):
     url = dec("aHR0cHM6Ly9vcGVucm91dGVyLmFpL2FwaS92MS9jaGF0L2NvbXBsZXRpb25z")
     h = {"Authorization": f"Bearer {OR_KEY}", "Content-Type": "application/json"}
-    sys_m = "أنت وكيل الحوكمة والتصحيح الذاتي في Albaraa Ai os. راجع المسودة وحسّنها مستفيداً من الدروس السابقة:\n" + lessons
+    sys_m = "أنت وكيل الحوكمة والتصحيح الذاتي في Albaraa Ai os. راجع المسودة وحسّنها مستفيداً من الدروس:\n" + lessons
     body = {"model": "openrouter/free", "messages": ({"role": "system", "content": sys_m}, {"role": "user", "content": f"الطلب: {prompt}\nالمسودة:\n{draft}"})}
     try:
-        r = requests.post(url, json=body, headers=h, timeout=30)
+        r = requests.post(url, json=body, headers=h, timeout=25)
         if r.status_code == 200:
             return r.json().get("choices", list()).pop(0).get("message", {}).get("content", "").strip()
     except Exception:
@@ -115,39 +116,11 @@ def make_pptx(chat_id, prompt):
     prs.save("/tmp/Out.pptx")
     send_file(chat_id, "/tmp/Out.pptx", "Albaraa_Presentation.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "📽️ عرض تقديمي جاهز | Albaraa Ai os")
 
-@app.route("/", methods=("GET",))
-def home():
-    return jsonify({"status": "online", "version": "v4.1"}), 200
-
-@app.route("/whatsapp-webhook", methods=("POST",))
-def whatsapp_webhook():
+def process_task(chat_id, user_msg, role, sender_name):
     t0 = time.time()
-    data = request.get_json(silent=True) or {}
-    wid = data.get('instanceData', {}).get('wid', '')
-    sender_d = data.get('senderData', {})
-    chat_id = sender_d.get('chatId') or data.get('chatId', '')
-    sender_name = sender_d.get('senderName', 'أحمد عز الدين')
-    msg_d = data.get('messageData', {})
-    user_msg = (msg_d.get('textMessageData', {}).get('textMessage') or msg_d.get('extendedTextMessageData', {}).get('text') or "").strip()
-
-    if not user_msg or user_msg.startswith(("🤖", "📊", "📽️", "⏳", "✅", "🧬")):
-        return jsonify({"status": "ignored"}), 200
-
-    is_admin = (wid and chat_id == wid)
-    is_lab = ("@g.us" in chat_id)
-
-    if user_msg == "تفعيل" and is_lab:
-        sb_req("POST", "users_and_roles", {"phone_or_chat_id": chat_id, "user_name": "أحمد عز الدين", "role": "co_lead", "specialty": "Data Science & GovTech"})
-        send_msg(chat_id, "✅ *تم تفعيل مختبر Albaraa Ai os بنجاح!*\nمرحباً بك يا أ. أحمد عز الدين.\nجميع وحدات (علم البيانات، Python، Power BI، Excel، منصة بلدي، وبناء الأنظمة) جاهزة لخدمتك الآن.")
-        return jsonify({"status": "activated"}), 200
-
-    if not is_admin and not is_lab:
-        return jsonify({"status": "unauthorized"}), 200
-
-    role = "admin" if is_admin else "co_lead"
     low = user_msg.lower()
 
-    if is_admin and user_msg.startswith(("ابن وكيل", "انشئ وكيل", "أنشئ وكيل")):
+    if role == "admin" and user_msg.startswith(("ابن وكيل", "انشئ وكيل", "أنشئ وكيل")):
         spec = call_groq(f"صمم وكيل ذكي لـ: {user_msg}", 'أعد JSON فقط: {"unit": "الوحدة", "name": "الاسم", "subs": "3 مساعدين", "prompt": "التعليمات"}')
         try:
             ag = json.loads(spec[spec.find("{"):spec.rfind("}") + 1])
@@ -155,32 +128,32 @@ def whatsapp_webhook():
             send_msg(chat_id, f"🧬 *مصنع الوكلاء:* تم بناء وتفعيل الوكيل *{ag.get('name')}* في الذاكرة السحابية!")
         except Exception:
             send_msg(chat_id, "✅ تم حفظ الوكيل الجديد في الذاكرة.")
-        return jsonify({"status": "agent_ok"}), 200
+        return
 
-    if is_admin and any(k in low for k in ("تقرير القياس", "جدول القياس", "احصائيات")):
+    if role == "admin" and any(k in low for k in ("تقرير القياس", "جدول القياس", "احصائيات")):
         logs = sb_req("GET", "telemetry_kpis", query="?order=id.desc&limit=50")
         rows = list()
         rows.append(("العملية", "الدور", "الوحدة", "الزمن(ث)", "الوقت الموفر(د)", "مؤشر التطور", "المخرج"))
         for i in logs:
             rows.append((i.get("id"), i.get("user_role"), i.get("unit_used"), i.get("response_time_sec"), i.get("time_saved_min"), i.get("user_growth_score"), i.get("deliverable_type")))
         make_excel(chat_id, "", custom_rows=rows, title="جدول القياس وتطور المستخدم")
-        return jsonify({"status": "kpi_ok"}), 200
+        return
 
     deliverable = "تقرير وبناء هندسي"
     if any(k in low for k in ("عرض", "بوربوينت", "شرائح", "pptx")):
         send_msg(chat_id, "⏳ جاري تصميم العرض التقديمي...")
         make_pptx(chat_id, user_msg)
         deliverable = "PowerPoint"
-    if any(k in low for k in ("اكسل", "إكسل", "excel", "جدول")):
+    elif any(k in low for k in ("اكسل", "إكسل", "excel", "جدول")):
         send_msg(chat_id, "⏳ جاري إعداد ملف الإكسل...")
         make_excel(chat_id, user_msg)
         deliverable = "Excel"
-    if deliverable == "تقرير وبناء هندسي":
+    else:
         past = sb_req("GET", "self_learning_logs", query="?order=id.desc&limit=3")
         lessons = "\n".join(tuple(x.get("lesson_learned", "") for x in past))
         sys_r = (
             "أنت منظومة Albaraa Ai os الهندسية (وحدات: علم البيانات، Python، Power BI، منصة بلدي، والمسيّرات والأنظمة الدفاعية). "
-            "إذا طلب المستخدم بناء منصة أو نظام أو أتمتة، لا تكتفِ بالنصائح بل صمم له الهيكل الكامل واكتب له الكود البرمجي الجاهز للتنفيذ خطوة بخطوة باللغة العربية."
+            "إذا طلب المستخدم بناء منصة أو نظام أو أتمتة، صمم له الهيكل الكامل واكتب له الكود البرمجي الجاهز للتنفيذ خطوة بخطوة باللغة العربية."
         )
         draft = call_groq(user_msg, sys_r) or call_gemini(f"{sys_r}\n{user_msg}") or "تعذر الاتصال."
         ans = call_or(user_msg, draft, lessons) if OR_KEY else draft
@@ -188,3 +161,31 @@ def whatsapp_webhook():
         send_msg(chat_id, f"🤖 *Albaraa Ai os — وحدة الهندسة والبناء*\n━━━━━━━━━━━━━━━━━━\n{ans}\n━━━━━━━━━━━━━━━━━━\n🧠 *التعلم الرجعي والذاكرة:* محدثة ✅")
 
     elapsed = round(time.time() - t0, 2)
+    growth = min(99, 80 + (5 if deliverable != "تقرير وبناء هندسي" else 3))
+    sb_req("POST", "telemetry_kpis", {"user_id": chat_id, "user_role": role, "unit_used": "Data & GovTech" if role == "co_lead" else "Admin", "task_complexity": "بناء هندسي", "response_time_sec": elapsed, "time_saved_min": 60 if deliverable != "تقرير وبناء هندسي" else 30, "user_growth_score": growth, "deliverable_type": deliverable})
+
+@app.route("/", methods=("GET",))
+def home():
+    return jsonify({"status": "online", "version": "v4.3-async"}), 200
+
+@app.route("/whatsapp-webhook", methods=("POST",))
+def whatsapp_webhook():
+    data = request.get_json(silent=True) or {}
+    w_type = data.get("typeWebhook", "")
+    if w_type not in ("incomingMessageReceived", "outgoingMessageReceived"):
+        return jsonify({"status": "ignored_type"}), 200
+
+    msg_id = data.get("idMessage", "")
+    if not msg_id or msg_id in PROCESSED_IDS:
+        return jsonify({"status": "duplicate_blocked"}), 200
+    PROCESSED_IDS.add(msg_id)
+    if len(PROCESSED_IDS) > 500:
+        PROCESSED_IDS.clear()
+
+    wid = data.get("instanceData", {}).get("wid", "")
+    sender_d = data.get("senderData", {})
+    chat_id = sender_d.get("chatId") or data.get("chatId", "")
+    sender_name = sender_d.get("senderName", "أحمد عز الدين")
+    msg_d = data.get("messageData", {})
+    user_msg = (msg_d.get("textMessageData", {}).get("textMessage") or msg_d.get("extendedTextMessageData", {}).get("text") or "").strip()
+

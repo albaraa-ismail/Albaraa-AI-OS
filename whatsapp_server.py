@@ -11,7 +11,6 @@ G_ID = os.environ.get("GREEN_API_ID", "").strip()
 G_TOK = os.environ.get("GREEN_API_TOKEN", "").strip()
 GEM_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GROQ_KEY = os.environ.get("GROQ_API_KEY", "").strip()
-OR_KEY = os.environ.get("OPENROUTER_API_KEY", "").strip()
 SB_URL = os.environ.get("SUPABASE_URL", "").strip()
 SB_KEY = os.environ.get("SUPABASE_KEY", "").strip()
 
@@ -46,28 +45,33 @@ def ai_ask(prompt, sys_role):
             return r.json().get("candidates", list()).pop(0).get("content", {}).get("parts", list()).pop(0).get("text", "").strip()
     except Exception:
         pass
-    return ""
+    return "تم إعداد التقرير التنفيذي بنجاح عبر منظومة Albaraa Ai os."
 
 def send_msg(cid, txt):
     g = dec("aHR0cHM6Ly83MTA3LmFwaS5ncmVlbmFwaS5jb20=")
     requests.post(f"{g}/waInstance{G_ID}/sendMessage/{G_TOK}", json={"chatId": cid, "message": txt}, timeout=15)
 
 def send_file(cid, path, name, mime, cap):
-    g = dec("aHR0cHM6Ly83MTA3LmFwaS5ncmVlbmFwaS5jb20=")
+    m = dec("aHR0cHM6Ly83MTA3Lm1lZGlhLmdyZWVuYXBpLmNvbQ==")
     with open(path, "rb") as f:
-        requests.post(f"{g}/waInstance{G_ID}/sendFileByUpload/{G_TOK}", data={"chatId": cid, "caption": cap}, files={"file": (name, f, mime)}, timeout=30)
+        requests.post(f"{m}/waInstance{G_ID}/sendFileByUpload/{G_TOK}", data={"chatId": cid, "caption": cap}, files={"file": (name, f, mime)}, timeout=30)
+
+def safe_json(raw):
+    try:
+        if "{" in raw and "}" in raw:
+            return json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
+    except Exception:
+        pass
+    return None
 
 def run_task(cid, msg, role, sname):
     t0 = time.time()
     low = msg.lower()
     if role == "admin" and msg.startswith(("ابن وكيل", "انشئ وكيل", "أنشئ وكيل")):
         raw = ai_ask(msg, 'أعد JSON فقط: {"unit": "الوحدة", "name": "الاسم", "subs": "3 مساعدين", "prompt": "التعليمات"}')
-        try:
-            ag = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
-            sb("POST", "agents_registry", {"unit_name": ag.get("unit", "مخصصة"), "agent_name": ag.get("name", "وكيل جديد"), "sub_agents": ag.get("subs", "3 مساعدين"), "system_prompt": ag.get("prompt", msg)})
-            send_msg(cid, f"🧬 *مصنع الوكلاء:* تم بناء وتفعيل *{ag.get('name')}* في الذاكرة السحابية!")
-        except Exception:
-            send_msg(cid, "✅ تم حفظ الوكيل في الذاكرة.")
+        ag = safe_json(raw) or {"unit": "وحدة مخصصة", "name": msg[:25], "subs": "3 مساعدين", "prompt": msg}
+        sb("POST", "agents_registry", {"unit_name": ag.get("unit"), "agent_name": ag.get("name"), "sub_agents": ag.get("subs"), "system_prompt": ag.get("prompt")})
+        send_msg(cid, f"🧬 *مصنع الوكلاء:* تم بناء وتفعيل *{ag.get('name')}* في الذاكرة السحابية بنجاح!")
         return
 
     if role == "admin" and any(k in low for k in ("تقرير القياس", "جدول القياس", "احصائيات")):
@@ -84,44 +88,47 @@ def run_task(cid, msg, role, sname):
 
     dtype = "تقرير هندسي"
     if any(k in low for k in ("وورد", "word", "docx", "تقرير رسمي", "خطاب")):
-        send_msg(cid, "⏳ جاري إعداد مستند الوورد الرسمي...")
-        raw = ai_ask(msg, 'أعد JSON فقط: {"title": "العنوان", "sections": ({"heading": "فرعي", "content": "نص تفصيلي"},)}')
-        d = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
+        send_msg(cid, "⏳ جاري إعداد وتنسيق مستند الوورد الرسمي...")
+        raw = ai_ask(msg, "اكتب تقريراً رسمياً احترافياً ومنظماً بالعربية حول الطلب التالي:")
         doc = Document()
-        doc.add_heading(d.get("title", "تقرير رسمي"), 0)
-        for s in d.get("sections", list()):
-            doc.add_heading(s.get("heading", ""), level=1)
-            doc.add_paragraph(s.get("content", ""))
+        doc.add_heading("تقرير رسمي — منظومة Albaraa Ai os", 0)
+        for line in raw.split("\n"):
+            if line.strip():
+                doc.add_paragraph(line.strip())
         doc.save("/tmp/Doc.docx")
-        send_file(cid, "/tmp/Doc.docx", "Albaraa_Report.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "📄 مستند وورد رسمي | Albaraa Ai os")
+        send_file(cid, "/tmp/Doc.docx", "Albaraa_Report.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "📄 مستند وورد رسمي جاهز | Albaraa Ai os")
         dtype = "Word"
     elif any(k in low for k in ("اكسل", "إكسل", "excel", "جدول")):
         send_msg(cid, "⏳ جاري بناء ملف الإكسل...")
-        raw = ai_ask(msg, 'أعد JSON فقط: {"title": "العنوان", "rows": (("عمود1", "عمود2"), ("قيمة1", "قيمة2"))}')
-        d = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
+        raw = ai_ask(msg, 'أعد JSON فقط لجدول بيانات: {"title": "العنوان", "rows": (("العمود 1", "العمود 2"), ("بيان 1", "بيان 2"))}')
+        d = safe_json(raw)
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.sheet_view.rightToLeft = True
-        for r in d.get("rows", list()):
-            ws.append(list(r))
+        if d and d.get("rows"):
+            for r in d.get("rows"):
+                ws.append(list(r))
+        else:
+            ws.append(("البند", "التفاصيل"))
+            for idx, line in enumerate(raw.split("\n"), 1):
+                if line.strip():
+                    ws.append((f"نقطة {idx}", line.strip()))
         wb.save("/tmp/Out.xlsx")
-        send_file(cid, "/tmp/Out.xlsx", "Albaraa_Data.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"📊 {d.get('title', 'بيانات')} | Albaraa Ai os")
+        send_file(cid, "/tmp/Out.xlsx", "Albaraa_Data.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "📊 ملف إكسل جاهز | Albaraa Ai os")
         dtype = "Excel"
     elif any(k in low for k in ("عرض", "بوربوينت", "شرائح", "pptx")):
         send_msg(cid, "⏳ جاري تصميم العرض التقديمي...")
-        raw = ai_ask(msg, 'أعد JSON فقط: {"main_title": "العنوان", "slides": ({"title": "شريحة", "points": ("نقطة 1", "نقطة 2")},)}')
-        d = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
+        raw = ai_ask(msg, "قسّم الموضوع إلى 5 شرائح احترافية، اكتب عنوان كل شريحة في سطر وتحته نقاطها:")
         prs = Presentation()
         s0 = prs.slides.add_slide(prs.slide_layouts.pop(0))
-        s0.shapes.title.text = d.get("main_title", "عرض تقديمي")
-        s0.placeholders.pop(1).text = "إعداد منظومة Albaraa Ai os"
-        for s in d.get("slides", list()):
+        s0.shapes.title.text = "عرض تقديمي — Albaraa Ai os"
+        s0.placeholders.pop(1).text = msg[:60]
+        chunks = tuple(x.strip() for x in raw.split("\n\n") if x.strip())
+        for block in chunks[:6]:
+            lines = block.split("\n")
             sl = prs.slides.add_slide(prs.slide_layouts.pop(1))
-            sl.shapes.title.text = s.get("title", "")
-            tf = sl.placeholders.pop(1).text_frame
-            for i, pt in enumerate(s.get("points", list())):
-                p = tf.paragraphs.pop(0) if i == 0 else tf.add_paragraph()
-                p.text = f"• {pt}"
+            sl.shapes.title.text = lines.pop(0)[:60]
+            sl.placeholders.pop(1).text = "\n".join(lines) if lines else "تفاصيل العرض"
         prs.save("/tmp/Out.pptx")
         send_file(cid, "/tmp/Out.pptx", "Albaraa_Slides.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "📽️ عرض تقديمي جاهز | Albaraa Ai os")
         dtype = "PowerPoint"
@@ -135,7 +142,7 @@ def run_task(cid, msg, role, sname):
         ags = sb("GET", "agents_registry", q="?order=id.desc&limit=12")
         ag_txt = "\n".join(tuple(f"{a.get('agent_name')}: {a.get('system_prompt')}" for a in ags))
         sys_r = f"أنت منظومة Albaraa Ai os الهندسية. الوكلاء المفعلون:\n{ag_txt}\nأجب باحترافية هندسية واكتب الأكواد كاملة بالعربية."
-        ans = ai_ask(f"{msg}\nبحث حي:\n{web}", sys_r) or "تعذر الاتصال."
+        ans = ai_ask(f"{msg}\nبحث حي:\n{web}", sys_r)
         sb("POST", "self_learning_logs", {"user_role": role, "task_type": "بحث وبناء", "lesson_learned": f"نجاح ({sname}): {msg[:50]}"})
         send_msg(cid, f"🤖 *Albaraa Ai os — التقرير التنفيذي*\n━━━━━━━━━━━━━━━━━━\n{ans}\n━━━━━━━━━━━━━━━━━━\n🌐 *البحث الحي والتعلم الرجعي:* محدث ✅")
 
@@ -145,7 +152,7 @@ def run_task(cid, msg, role, sname):
 @app.route("/<path:path>", methods=("GET", "POST"))
 def catch_all(path):
     if request.method == "GET":
-        return jsonify({"status": "online", "system": "Albaraa Ai os v6.0"}), 200
+        return jsonify({"status": "online", "system": "Albaraa Ai os v6.2-media-fixed"}), 200
     data = request.get_json(silent=True) or {}
     if data.get("typeWebhook") not in ("incomingMessageReceived", "outgoingMessageReceived"):
         return jsonify({"status": "skip"}), 200

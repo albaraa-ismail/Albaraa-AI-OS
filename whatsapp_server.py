@@ -20,7 +20,7 @@ def dec(b64_str):
 
 def sb_request(method, table, payload=None, query=""):
     if not SB_URL or not SB_KEY:
-        return []
+        return list()
     url = f"{SB_URL}/rest/v1/{table}{query}"
     headers = {
         "apikey": SB_KEY,
@@ -33,26 +33,26 @@ def sb_request(method, table, payload=None, query=""):
             r = requests.get(url, headers=headers, timeout=10)
         else:
             r = requests.post(url, json=payload, headers=headers, timeout=10)
-        if r.status_code in:
+        if r.status_code in (200, 201):
             return r.json()
     except Exception as e:
         print("SB err:", e, flush=True)
-    return []
+    return list()
 
 def call_groq(prompt, sys_role):
     url = dec("aHR0cHM6Ly9hcGkuZ3JvcS5jb20vb3BlbmFpL3YxL2NoYXQvY29tcGxldGlvbnM=")
     headers = {"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"}
     body = {
         "model": "llama-3.3-70b-versatile",
-        "messages": [
+        "messages": (
             {"role": "system", "content": sys_role},
             {"role": "user", "content": prompt}
-        ]
+        )
     }
     try:
         r = requests.post(url, json=body, headers=headers, timeout=25)
         if r.status_code == 200:
-            return r.json().get("choices", []).pop(0).get("message", {}).get("content", "").strip()
+            return r.json().get("choices", list()).pop(0).get("message", {}).get("content", "").strip()
     except Exception:
         pass
     return ""
@@ -60,13 +60,13 @@ def call_groq(prompt, sys_role):
 def call_gemini(prompt):
     base = dec("aHR0cHM6Ly9nZW5lcmF0aXZlbGFuZ3VhZ2UuZ29vZ2xlYXBpcy5jb20vdjFiZXRhL21vZGVscw==")
     url = f"{base}/gemini-2.5-flash:generateContent?key={GEM_KEY}"
-    body = {"contents": [{"parts": [{"text": prompt}]}]}
+    body = {"contents": ({"parts": ({"text": prompt},)},)}
     try:
         r = requests.post(url, json=body, timeout=25)
         if r.status_code == 200:
-            c = r.json().get("candidates", [])
+            c = r.json().get("candidates", list())
             if c:
-                return c.pop(0).get("content", {}).get("parts", []).pop(0).get("text", "").strip()
+                return c.pop(0).get("content", {}).get("parts", list()).pop(0).get("text", "").strip()
     except Exception:
         pass
     return ""
@@ -80,15 +80,15 @@ def call_openrouter(prompt, draft, lessons=""):
     )
     body = {
         "model": "openrouter/free",
-        "messages": [
+        "messages": (
             {"role": "system", "content": sys_msg},
             {"role": "user", "content": f"الطلب: {prompt}\nالمسودة:\n{draft}"}
-        ]
+        )
     }
     try:
         r = requests.post(url, json=body, headers=headers, timeout=25)
         if r.status_code == 200:
-            return r.json().get("choices", []).pop(0).get("message", {}).get("content", "").strip()
+            return r.json().get("choices", list()).pop(0).get("message", {}).get("content", "").strip()
     except Exception:
         pass
     return draft
@@ -107,10 +107,10 @@ def send_file(chat_id, path, name, mime, caption):
 
 def build_excel(chat_id, prompt, custom_rows=None, title="تقرير بيانات"):
     if not custom_rows:
-        sys_j = 'أعد JSON فقط: {"title": "عنوان", "rows": [["عمود1", "عمود2"], ["قيمة1", "قيمة2"]]}'
+        sys_j = 'أعد JSON فقط: {"title": "عنوان", "rows": (("عمود1", "عمود2"), ("قيمة1", "قيمة2"))}'
         raw = call_groq(prompt, sys_j) or call_gemini(f"{sys_j}\n{prompt}")
         data = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
-        rows = data.get("rows", [])
+        rows = data.get("rows", list())
         title = data.get("title", title)
     else:
         rows = custom_rows
@@ -118,25 +118,25 @@ def build_excel(chat_id, prompt, custom_rows=None, title="تقرير بيانا�
     ws = wb.active
     ws.sheet_view.rightToLeft = True
     for r in rows:
-        ws.append(r)
+        ws.append(list(r))
     path = "/tmp/Albaraa_Output.xlsx"
     wb.save(path)
     send_file(chat_id, path, "Albaraa_Output.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"📊 *{title}* | Albaraa Ai os")
 
 def build_pptx(chat_id, prompt):
-    sys_j = 'أعد JSON فقط: {"main_title": "العنوان", "slides": [{"title": "شريحة", "points": ["نقطة 1", "نقطة 2"]}]}'
+    sys_j = 'أعد JSON فقط: {"main_title": "العنوان", "slides": ({"title": "شريحة", "points": ("نقطة 1", "نقطة 2")},)}'
     raw = call_groq(prompt, sys_j) or call_gemini(f"{sys_j}\n{prompt}")
     data = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
     prs = Presentation()
     s0 = prs.slides.add_slide(prs.slide_layouts.pop(0))
     s0.shapes.title.text = data.get("main_title", "عرض تقديمي")
     s0.placeholders.pop(1).text = "إعداد نظام Albaraa Ai os"
-    for s in data.get("slides", []):
-        sl = prs.slides.add_slide(prs.slide_layouts)
+    for s in data.get("slides", list()):
+        sl = prs.slides.add_slide(prs.slide_layouts.pop(1))
         sl.shapes.title.text = s.get("title", "")
-        tf = sl.placeholders.text_frame
+        tf = sl.placeholders.pop(1).text_frame
         tf.clear()
-        for i, pt in enumerate(s.get("points", [])):
+        for i, pt in enumerate(s.get("points", list())):
             p = tf.paragraphs.pop(0) if i == 0 else tf.add_paragraph()
             p.text = f"• {pt}"
             p.font.size = Pt(20)
@@ -144,11 +144,11 @@ def build_pptx(chat_id, prompt):
     prs.save(path)
     send_file(chat_id, path, "Albaraa_Presentation.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "📽️ عرض تقديمي جاهز | Albaraa Ai os")
 
-@app.route("/", methods=["GET"])
+@app.route("/", methods=("GET",))
 def home():
     return jsonify({"status": "online", "system": "Albaraa Ai os v4.0 Enterprise"}), 200
 
-@app.route("/whatsapp-webhook", methods=["POST"])
+@app.route("/whatsapp-webhook", methods=("POST",))
 def whatsapp_webhook():
     t0 = time.time()
     data = request.get_json(silent=True) or {}
@@ -166,7 +166,6 @@ def whatsapp_webhook():
     registered = sb_request("GET", "users_and_roles", query=f"?phone_or_chat_id=eq.{chat_id}")
     is_lab_group = len(registered) > 0
 
-    # تفعيل مجموعة المختبر لشريكك بأمر واحد
     if user_msg == "تفعيل" and "@g.us" in chat_id:
         sb_request("POST", "users_and_roles", {
             "phone_or_chat_id": chat_id,
@@ -183,9 +182,8 @@ def whatsapp_webhook():
     role = "admin" if is_admin_chat else "co_lead"
     low = user_msg.lower()
 
-    # 1. أمر المشرف لبناء وكيل جديد ديناميكياً (Agent Factory)
     if is_admin_chat and user_msg.startswith(("ابن وكيل", "انشئ وكيل", "أنشئ وكيل")):
-        spec = call_groq(f"صمم تعريف وكيل ذكي بناءً على: {user_msg}", "أعد JSON فقط: {\"unit\": \"الوحدة\", \"name\": \"اسم الوكيل\", \"subs\": \"3 مساعدين\", \"prompt\": \"التعليمات\"}")
+        spec = call_groq(f"صمم تعريف وكيل ذكي بناءً على: {user_msg}", 'أعد JSON فقط: {"unit": "الوحدة", "name": "اسم الوكيل", "subs": "3 مساعدين", "prompt": "التعليمات"}')
         try:
             ag = json.loads(spec[spec.find("{"):spec.rfind("}") + 1])
             sb_request("POST", "agents_registry", {
@@ -199,20 +197,21 @@ def whatsapp_webhook():
             send_msg(chat_id, "✅ تم تسجيل الوكيل الجديد في الذاكرة السحابية.")
         return jsonify({"status": "agent_created"}), 200
 
-    # 2. أمر المشرف لاستخراج جدول القياس وتطور المستخدم للإمارة والبحث
-    if is_admin_chat and any(k in low for k in ["تقرير القياس", "جدول القياس", "احصائيات"]):
+    if is_admin_chat and any(k in low for k in ("تقرير القياس", "جدول القياس", "احصائيات")):
         logs = sb_request("GET", "telemetry_kpis", query="?order=id.desc&limit=50")
-        rows = [["رقم العملية", "الدور", "الوحدة المستخدمة", "زمن الاستجابة (ث)", "الوقت الموفر (دقيقة)", "مؤشر تطور المستخدم", "نوع المخرج"]]
+        rows = list()
+        rows.append(("رقم العملية", "الدور", "الوحدة المستخدمة", "زمن الاستجابة (ث)", "الوقت الموفر (دقيقة)", "مؤشر تطور المستخدم", "نوع المخرج"))
         for item in logs:
-            rows.append([item.get("id"), item.get("user_role"), item.get("unit_used"), item.get("response_time_sec"), item.get("time_saved_min"), item.get("user_growth_score"), item.get("deliverable_type")])
+            rows.append((item.get("id"), item.get("user_role"), item.get("unit_used"), item.get("response_time_sec"), item.get("time_saved_min"), item.get("user_growth_score"), item.get("deliverable_type")))
         build_excel(chat_id, "", custom_rows=rows, title="جدول القياس العلمي وتطور المستخدم - Albaraa Ai os")
         return jsonify({"status": "kpi_sent"}), 200
 
-    # 3. إنتاج ملفات Excel أو PowerPoint
     deliverable = "تقرير استشاري"
-    if any(k in low for k in ["عرض", "بوربوينت", "شرائح", "pptx"]):
+    if any(k in low for k in ("عرض", "بوربوينت", "شرائح", "pptx")):
         send_msg(chat_id, "⏳ جاري تصميم العرض التقديمي عبر وحدة المخرجات...")
         try:
             build_pptx(chat_id, user_msg)
             deliverable = "PowerPoint"
         except Exception:
+            send_msg(chat_id, "تعذر توليد العرض، يرجى تبسيط الطلب.")
+    elif any(k in low for k in ("اكسل", "إكسل", "excel", "جدول")):

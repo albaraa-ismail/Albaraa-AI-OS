@@ -52,9 +52,9 @@ def send_msg(cid, txt):
     requests.post(f"{g}/waInstance{G_ID}/sendMessage/{G_TOK}", json={"chatId": cid, "message": txt}, timeout=15)
 
 def send_file(cid, path, name, mime, cap):
-    m = dec("aHR0cHM6Ly83MTA3Lm1lZGlhLmdyZWVuYXBpLmNvbQ==")
+    g = dec("aHR0cHM6Ly83MTA3LmFwaS5ncmVlbmFwaS5jb20=")
     with open(path, "rb") as f:
-        requests.post(f"{m}/waInstance{G_ID}/sendFileByUpload/{G_TOK}", data={"chatId": cid, "caption": cap}, files={"file": (name, f, mime)}, timeout=30)
+        requests.post(f"{g}/waInstance{G_ID}/sendFileByUpload/{G_TOK}", data={"chatId": cid, "caption": cap}, files={"file": (name, f, mime)}, timeout=30)
 
 def safe_json(raw):
     try:
@@ -152,7 +152,7 @@ def run_task(cid, msg, role, sname):
 @app.route("/<path:path>", methods=("GET", "POST"))
 def catch_all(path):
     if request.method == "GET":
-        return jsonify({"status": "online", "system": "Albaraa Ai os v6.2-media-fixed"}), 200
+        return jsonify({"status": "online", "system": "Albaraa Ai os v6.3-final"}), 200
     data = request.get_json(silent=True) or {}
     if data.get("typeWebhook") not in ("incomingMessageReceived", "outgoingMessageReceived"):
         return jsonify({"status": "skip"}), 200

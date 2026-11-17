@@ -32,9 +32,12 @@ def whatsapp_webhook():
     data = request.get_json(silent=True) or {}
     wid = data.get('instanceData', {}).get('wid', '')
     body = data.get('body', {})
-    chat_id = body.get('senderData', {}).get('chatId', '')
+    chat_id = body.get('chatId') or body.get('senderData', {}).get('chatId', '')
     msg_data = body.get('messageData', {})
-    user_msg = msg_data.get('textMessageData', {}).get('textMessage', '').strip()
+    user_msg = (
+        msg_data.get('textMessageData', {}).get('textMessage') or
+        msg_data.get('extendedTextMessageData', {}).get('text') or ""
+    ).strip()
 
     if wid and chat_id == wid and user_msg and not user_msg.startswith("*تقرير Albaraa-AI-OS*"):
         constraints = "الالتزام بالأدوات المجانية ومفتوحة المصدر فقط"

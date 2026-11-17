@@ -21,6 +21,7 @@ def send_whatsapp_response(chat_id, text_to_send):
     headers = {'Content-Type': 'application/json'}
     try:
         response = requests.post(url, json=payload, headers=headers, timeout=10)
+        print(f"حالة الإرسال للواتساب: {response.status_code} - {response.text}")
         return response.status_code == 200
     except Exception as e:
         print(f"خطأ في الإرسال: {str(e)}")
@@ -35,16 +36,21 @@ def home():
 @app.route("/whatsapp-webhook", methods=["POST"])
 def whatsapp_webhook():
     incoming_data = request.get_json(silent=True)
+    print("وصل إشعار من Green API:", incoming_data)
+    
     if not incoming_data:
         return jsonify({"status": "error", "message": "No JSON data"}), 400
         
-    # التحقق أن الرسالة صادرة من جوالك الشخصي
-    if incoming_data.get('typeWebhook') == 'outgoingMessageReceived':
+    type_webhook = incoming_data.get('typeWebhook', '')
+    
+    # استقبال الرسائل الصادرة من جوالك
+    if type_webhook in ['outgoingMessageReceived', 'outgoingAPIMessageReceived']:
         instance_wid = incoming_data.get('instanceData', {}).get('wid', '')
         body = incoming_data.get('body', {})
-        chat_id = body.get('senderData', {}).get('chatId', '')
+        sender_data = body.get('senderData', {})
+        chat_id = sender_data.get('chatId') or body.get('chatId', '')
         
-        # شرط الحماية: لا يعمل النظام إلا إذا كنت تراسل نفسك
+        # التأكد أن المحادثة هي محادثتك مع نفسك فقط
         if instance_wid and chat_id == instance_wid:
             message_data = body.get('messageData', {})
             user_message = message_data.get('textMessageData', {}).get('textMessage', '').strip()

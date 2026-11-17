@@ -5,7 +5,7 @@ from main import MultiAgentSystem
 
 app = Flask(__name__)
 
-# بيانات الربط مع Green API (يتم قراءتها تلقائياً من إعدادات Render)
+# بيانات الربط مع Green API
 GREEN_API_ID = os.environ.get("GREEN_API_ID", "")
 GREEN_API_TOKEN = os.environ.get("GREEN_API_TOKEN", "")
 
@@ -13,7 +13,8 @@ ai_os = MultiAgentSystem()
 
 # إرسال الرد للواتساب
 def send_whatsapp_response(chat_id, text_to_send):
-    url = f"https://greenapi.com{GREEN_API_ID}/sendMessage/{GREEN_API_TOKEN}"
+    base_url = "https://green-api.com"
+    url = f"{base_url}/waInstance{GREEN_API_ID}/sendMessage/{GREEN_API_TOKEN}"
     payload = {
         "chatId": chat_id,
         "message": text_to_send

@@ -16,11 +16,11 @@ def send_whatsapp_response(chat_id, text_to_send):
     payload = {"chatId": chat_id, "message": text_to_send}
     headers = {'Content-Type': 'application/json'}
     try:
-        response = requests.post(url, json=payload, headers=headers, timeout=15)
-        print("نتيجة الإرسال:", response.status_code, response.text, flush=True)
-        return response.status_code == 200
+        res = requests.post(url, json=payload, headers=headers, timeout=15)
+        print("نتيجة الإرسال:", res.status_code, res.text, flush=True)
+        return res.status_code == 200
     except Exception as e:
-        print("خطأ في الإرسال:", str(e), flush=True)
+        print("خطأ:", str(e), flush=True)
         return False
 
 @app.route("/", methods=["GET"])
@@ -29,61 +29,49 @@ def home():
 
 @app.route("/whatsapp-webhook", methods=["POST"])
 def whatsapp_webhook():
-    incoming_data = request.get_json(silent=True)
-    if not incoming_data:
-        return jsonify({"status": "error"}), 400
-        
-    type_wh = incoming_data.get('typeWebhook', '')
-    wid = incoming_data.get('instanceData', {}).get('wid', '')
-    body = incoming_data.get('body', {})
-    chat_id = body.get('senderData', {}).get('chatId') or body.get('chatId', '')
-    
+    data = request.get_json(silent=True) or {}
+    wid = data.get('instanceData', {}).get('wid', '')
+    body = data.get('body', {})
+    chat_id = body.get('senderData', {}).get('chatId', '')
     msg_data = body.get('messageData', {})
-    user_message = (
-        msg_data.get('textMessageData', {}).get('textMessage') or
-        msg_data.get('extendedTextMessageData', {}).get('text') or
-        ""
-    ).strip()
+    user_msg = msg_data.get('textMessageData', {}).get('textMessage', '').strip()
 
-    print(f"فحص: type={type_wh} | wid={wid} | chat={chat_id} | msg={user_message}", flush=True)
-
-    if wid and chat_id == wid and user_message and not user_message.startswith("*تقرير Albaraa-AI-OS*"):
+    if wid and chat_id == wid and user_msg and not user_msg.startswith("*تقرير Albaraa-AI-OS*"):
         constraints = "الالتزام بالأدوات المجانية ومفتوحة المصدر فقط"
         try:
-            init_status = ai_os.chief.orchestrate_task(user_message, constraints)
-            refined_query = ai_os.research.refine_query(user_message, constraints)
+            init_status = ai_os.chief.orchestrate_task(user_msg, constraints)
+            refined_query = ai_os.research.refine_query(user_msg, constraints)
             
-            mock_web_data = [
+            mock_data = [
                 {"name": "GitHub Copilot", "type": "Paid"},
                 {"name": "VS Code Core", "type": "Free"},
                 {"name": "Ollama Local LLM", "type": "Free"},
                 {"name": "Replit Agent", "type": "Paid"}
             ]
-            approved, blocked = ai_os.governance.audit_results(mock_web_data, constraints)
+            approved, blocked = ai_os.governance.audit_results(mock_data, constraints)
             build_log = ai_os.builder.generate_code_structure("AI Agent Framework")
             eval_log = ai_os.trainer.evaluate_performance("Execution OK")
             
-            approved_names = ", ".join([t['name'] for t in approved])
-            blocked_names = ", ".join([t['name'] for t in blocked])
+            app_names = ", ".join([t['name'] for t in approved])
+            blk_names = ", ".join([t['name'] for t in blocked])
             
-            whatsapp_response = (
+            reply = (
                 f"*تقرير Albaraa-AI-OS*\n"
                 f"--------------------\n"
                 f"*القائد ({init_status['orchestrator']}):* تم استلام الطلب.\n\n"
                 f"*البحث ({ai_os.research.name}):* {refined_query}\n\n"
                 f"*الحوكمة ({ai_os.governance.name}):*\n"
-                f"- المعتمد: [{approved_names}]\n"
-                f"- المحجوب: [{blocked_names}]\n\n"
+                f"- المعتمد: [{app_names}]\n"
+                f"- المحجوب: [{blk_names}]\n\n"
                 f"*البناء ({ai_os.builder.name}):* {build_log}\n\n"
                 f"*التقييم ({ai_os.trainer.name}):* الدقة {eval_log['accuracy']}\n"
                 f"--------------------\n"
                 f"تم حفظ العملية في الذاكرة."
             )
-            
-            send_whatsapp_response(chat_id, whatsapp_response)
+            send_whatsapp_response(chat_id, reply)
             return jsonify({"status": "success"}), 200
         except Exception as e:
-            print("خطأ في المعالجة:", str(e), flush=True)
+            print("خطأ المعالجة:", str(e), flush=True)
             return jsonify({"status": "error"}), 500
             
     return jsonify({"status": "ignored"}), 200

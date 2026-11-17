@@ -1,7 +1,6 @@
 import os
 import json
 
-# استدعاء الوكلاء الستة المطورين من مجلد agents
 from agents.chief_agent import ChiefAgent
 from agents.research_agent import ResearchAgent
 from agents.builder_agent import BuilderAgent
@@ -20,19 +19,16 @@ class MultiAgentSystem:
         self.exporter = CareerAgent()
         
     def run_live_demo(self, query, constraints):
-        print("\n==========================================")
-        print("🚀 [النظام] جاري تشغيل بيئة المحاكاة الحية لـ Albaraa-Ai-os")
-        print("==========================================\n")
+        print("\n--- تشغيل محاكاة Albaraa-AI-OS ---")
         
-        # 1. القائد يستقبل المهمة
+        # استلام المهمة وتنقيح الاستعلام
         init_status = self.chief.orchestrate_task(query, constraints)
-        print(f"-> {init_status['orchestrator']}: استلمت الطلب وبدأت التوجيه.\n")
+        print(f"-> {init_status['orchestrator']}: تم استلام الطلب.")
         
-        # 2. وكيل البحث ينقح الاستعلام ديناميكياً
         refined = self.research.refine_query(query, constraints)
-        print(f"-> {self.research.name}: تم تنقيح وتوسيع الاستعلام إلى: '{refined}'\n")
+        print(f"-> {self.research.name}: الاستعلام الجديد -> '{refined}'")
         
-        # 3. مصفوفة بيانات تجريبية (مفتوح ومغلق المصدر / مجاني ومدفوع)
+        # بيانات تجريبية للفحص
         mock_web_data = [
             {"name": "GitHub Copilot", "type": "Paid"},
             {"name": "VS Code Core", "type": "Free"},
@@ -40,27 +36,26 @@ class MultiAgentSystem:
             {"name": "Replit Agent", "type": "Paid"}
         ]
         
-        # 4. وكيل الحوكمة يفحص الامتثال (النظام الخبير)
+        # فحص الأدوات وتطبيق الشروط
         approved, blocked = self.governance.audit_results(mock_web_data, constraints)
-        print(f"-> {self.governance.name}: جاري تطبيق فلاتر الحوكمة الصارمة...")
-        print(f"   [✓] الأدوات المعتمدة: {[t['name'] for t in approved]}")
-        print(f"   [X] الأدوات المحجوبة: {[t['name'] for t in blocked]}\n")
+        print(f"-> {self.governance.name}:")
+        print(f"   المعتمد: {[t['name'] for t in approved]}")
+        print(f"   المحجوب: {[t['name'] for t in blocked]}")
         
-        # 5. وكيل المطور يولد الهيكلية
+        # بناء الهيكلية وتصدير التقرير
         build_log = self.builder.generate_code_structure("AI Agent Framework")
-        print(f"-> {self.builder.name}: {build_log}\n")
+        print(f"-> {self.builder.name}: {build_log}")
         
-        # 6. وكيل التطبيقات يصدر التقرير النهائي
         report_log = self.exporter.export_report(approved)
         print(f"-> {self.exporter.name}: {report_log}")
         
-        # 7. مدرب الأنظمة يقيم جودة العملية بالكامل
+        # تقييم الأداء
         eval_log = self.trainer.evaluate_performance("Execution OK")
-        print(f"-> {self.trainer.name}: تم الفحص. الدقة المحققة: {eval_log['accuracy']}\n")
+        print(f"-> {self.trainer.name}: الدقة -> {eval_log['accuracy']}")
         
-        # حفظ السجل النهائي في الذاكرة المشتركة
+        # حفظ المخرجات في الذاكرة
         final_output = {
-            "system": "Albaraa-Ai-os",
+            "system": "Albaraa-AI-OS",
             "approved": approved,
             "blocked": blocked,
             "evaluation": eval_log
@@ -69,14 +64,11 @@ class MultiAgentSystem:
         with open("shared_memory/project_draft.txt", "w", encoding="utf-8") as f:
             json.dump(final_output, f, ensure_ascii=False, indent=4)
             
-        print("==========================================")
-        print("💾 [النظام] تم حفظ تقرير العمليات بنجاح في shared_memory/project_draft.txt")
-        print("==========================================")
+        print("--- تم حفظ التقرير في shared_memory/project_draft.txt ---")
 
 if __name__ == "__main__":
-    # تشغيل السيناريو الفعلي المطابق لشروط تخرجك وهدفك التجاري
     os_system = MultiAgentSystem()
     user_query = "البحث عن أدوات ذكاء اصطناعي لبناء المنصة وتوليد الأكواد"
-    user_constraints = "يجب الالتزام بالأدوات المجانية ومفتوحة المصدر فقط واستبعاد المدفوع"
+    user_constraints = "الالتزام بالأدوات المجانية ومفتوحة المصدر فقط"
     
     os_system.run_live_demo(user_query, user_constraints)

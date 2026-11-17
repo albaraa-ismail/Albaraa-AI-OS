@@ -13,7 +13,7 @@ ai_os = MultiAgentSystem()
 
 # إرسال الرد للواتساب
 def send_whatsapp_response(chat_id, text_to_send):
-    host = "://greenapi.com"
+    host = "7107" + ".api." + "greenapi.com"
     url = f"https://{host}/waInstance{GREEN_API_ID}/sendMessage/{GREEN_API_TOKEN}"
     payload = {
         "chatId": chat_id,

@@ -180,7 +180,7 @@ def process_task(chat_id, user_msg, role, sender_name):
     else:
         web_info = live_search(user_msg)
         past = sb_req("GET", "self_learning_logs", query="?order=id.desc&limit=3")
-        custom_ag = sb_req("GET", "agents_registry", query="?order=id.desc&limit=10")
+        custom_ag = sb_req("GET", "agents_registry", query="?order=id.desc&limit=12")
         lessons = "\n".join(tuple(x.get("lesson_learned", "") for x in past))
         extra_agents = "\n".join(tuple(f"{a.get('agent_name')}: {a.get('system_prompt')}" for a in custom_ag))
         sys_r = (

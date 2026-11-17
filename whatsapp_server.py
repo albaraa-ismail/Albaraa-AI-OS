@@ -36,7 +36,7 @@ def call_groq(prompt, sys_role):
     h = {"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"}
     body = {"model": "llama-3.3-70b-versatile", "messages": ({"role": "system", "content": sys_role}, {"role": "user", "content": prompt})}
     try:
-        r = requests.post(url, json=body, headers=h, timeout=25)
+        r = requests.post(url, json=body, headers=h, timeout=30)
         if r.status_code == 200:
             return r.json().get("choices", list()).pop(0).get("message", {}).get("content", "").strip()
     except Exception:
@@ -47,7 +47,7 @@ def call_gemini(prompt):
     base = dec("aHR0cHM6Ly9nZW5lcmF0aXZlbGFuZ3VhZ2UuZ29vZ2xlYXBpcy5jb20vdjFiZXRhL21vZGVscw==")
     url = f"{base}/gemini-2.5-flash:generateContent?key={GEM_KEY}"
     try:
-        r = requests.post(url, json={"contents": ({"parts": ({"text": prompt},)},)}, timeout=25)
+        r = requests.post(url, json={"contents": ({"parts": ({"text": prompt},)},)}, timeout=30)
         if r.status_code == 200:
             c = r.json().get("candidates", list())
             if c:
@@ -59,10 +59,10 @@ def call_gemini(prompt):
 def call_or(prompt, draft, lessons=""):
     url = dec("aHR0cHM6Ly9vcGVucm91dGVyLmFpL2FwaS92MS9jaGF0L2NvbXBsZXRpb25z")
     h = {"Authorization": f"Bearer {OR_KEY}", "Content-Type": "application/json"}
-    sys_m = "أنت وكيل الحوكمة والتصحيح الذاتي في Albaraa Ai os. راجع المسودة وصححها مستفيداً من الدروس:\n" + lessons
+    sys_m = "أنت وكيل الحوكمة والتصحيح الذاتي في Albaraa Ai os. راجع المسودة وحسّنها مستفيداً من الدروس السابقة:\n" + lessons
     body = {"model": "openrouter/free", "messages": ({"role": "system", "content": sys_m}, {"role": "user", "content": f"الطلب: {prompt}\nالمسودة:\n{draft}"})}
     try:
-        r = requests.post(url, json=body, headers=h, timeout=25)
+        r = requests.post(url, json=body, headers=h, timeout=30)
         if r.status_code == 200:
             return r.json().get("choices", list()).pop(0).get("message", {}).get("content", "").strip()
     except Exception:
@@ -117,14 +117,16 @@ def make_pptx(chat_id, prompt):
 
 @app.route("/", methods=("GET",))
 def home():
-    return jsonify({"status": "online", "version": "v4.0"}), 200
+    return jsonify({"status": "online", "version": "v4.1"}), 200
 
 @app.route("/whatsapp-webhook", methods=("POST",))
 def whatsapp_webhook():
     t0 = time.time()
     data = request.get_json(silent=True) or {}
     wid = data.get('instanceData', {}).get('wid', '')
-    chat_id = data.get('senderData', {}).get('chatId') or data.get('chatId', '')
+    sender_d = data.get('senderData', {})
+    chat_id = sender_d.get('chatId') or data.get('chatId', '')
+    sender_name = sender_d.get('senderName', 'أحمد عز الدين')
     msg_d = data.get('messageData', {})
     user_msg = (msg_d.get('textMessageData', {}).get('textMessage') or msg_d.get('extendedTextMessageData', {}).get('text') or "").strip()
 
@@ -132,12 +134,11 @@ def whatsapp_webhook():
         return jsonify({"status": "ignored"}), 200
 
     is_admin = (wid and chat_id == wid)
-    reg = sb_req("GET", "users_and_roles", query=f"?phone_or_chat_id=eq.{chat_id}")
-    is_lab = len(reg) > 0
+    is_lab = ("@g.us" in chat_id)
 
-    if user_msg == "تفعيل" and "@g.us" in chat_id:
+    if user_msg == "تفعيل" and is_lab:
         sb_req("POST", "users_and_roles", {"phone_or_chat_id": chat_id, "user_name": "أحمد عز الدين", "role": "co_lead", "specialty": "Data Science & GovTech"})
-        send_msg(chat_id, "✅ *تم تفعيل مختبر Albaraa Ai os بنجاح!*\nمرحباً بك يا أ. أحمد عز الدين.\nجميع وحدات (علم البيانات، Python، Power BI، Excel، منصة بلدي، ومشاريع الأكاديمية) جاهزة لخدمتك الآن، والذاكرة السحابية وقياس التطور قيد العمل.")
+        send_msg(chat_id, "✅ *تم تفعيل مختبر Albaraa Ai os بنجاح!*\nمرحباً بك يا أ. أحمد عز الدين.\nجميع وحدات (علم البيانات، Python، Power BI، Excel، منصة بلدي، وبناء الأنظمة) جاهزة لخدمتك الآن.")
         return jsonify({"status": "activated"}), 200
 
     if not is_admin and not is_lab:
@@ -165,7 +166,7 @@ def whatsapp_webhook():
         make_excel(chat_id, "", custom_rows=rows, title="جدول القياس وتطور المستخدم")
         return jsonify({"status": "kpi_ok"}), 200
 
-    deliverable = "تقرير استشاري"
+    deliverable = "تقرير وبناء هندسي"
     if any(k in low for k in ("عرض", "بوربوينت", "شرائح", "pptx")):
         send_msg(chat_id, "⏳ جاري تصميم العرض التقديمي...")
         make_pptx(chat_id, user_msg)
@@ -174,14 +175,16 @@ def whatsapp_webhook():
         send_msg(chat_id, "⏳ جاري إعداد ملف الإكسل...")
         make_excel(chat_id, user_msg)
         deliverable = "Excel"
-    if deliverable == "تقرير استشاري":
+    if deliverable == "تقرير وبناء هندسي":
         past = sb_req("GET", "self_learning_logs", query="?order=id.desc&limit=3")
         lessons = "\n".join(tuple(x.get("lesson_learned", "") for x in past))
-        sys_r = "أنت منظومة Albaraa Ai os (وحدات: علم البيانات، Python، Power BI، منصة بلدي، والمسيّرات والأنظمة الدفاعية). أجب باحترافية هندسية بالعربية."
+        sys_r = (
+            "أنت منظومة Albaraa Ai os الهندسية (وحدات: علم البيانات، Python، Power BI، منصة بلدي، والمسيّرات والأنظمة الدفاعية). "
+            "إذا طلب المستخدم بناء منصة أو نظام أو أتمتة، لا تكتفِ بالنصائح بل صمم له الهيكل الكامل واكتب له الكود البرمجي الجاهز للتنفيذ خطوة بخطوة باللغة العربية."
+        )
         draft = call_groq(user_msg, sys_r) or call_gemini(f"{sys_r}\n{user_msg}") or "تعذر الاتصال."
         ans = call_or(user_msg, draft, lessons) if OR_KEY else draft
-        sb_req("POST", "self_learning_logs", {"user_role": role, "task_type": "هندسي", "lesson_learned": f"نجاح معالجة: {user_msg[:50]}"})
-        send_msg(chat_id, f"🤖 *Albaraa Ai os — التقرير التنفيذي*\n━━━━━━━━━━━━━━━━━━\n{ans}\n━━━━━━━━━━━━━━━━━━\n🧠 *التعلم الرجعي والذاكرة:* محدثة ✅")
+        sb_req("POST", "self_learning_logs", {"user_role": role, "task_type": "بناء وهندسة", "lesson_learned": f"تم بناء وتنفيذ طلب ({sender_name}): {user_msg[:50]}"})
+        send_msg(chat_id, f"🤖 *Albaraa Ai os — وحدة الهندسة والبناء*\n━━━━━━━━━━━━━━━━━━\n{ans}\n━━━━━━━━━━━━━━━━━━\n🧠 *التعلم الرجعي والذاكرة:* محدثة ✅")
 
     elapsed = round(time.time() - t0, 2)
-    growth = min(99, 75 + len(reg) * 5 + (5 if deliverable != "تقرير استشاري" else 2))

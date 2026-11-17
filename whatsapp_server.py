@@ -6,6 +6,8 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 SEEN = set()
+
+G_URL = os.environ.get("GREEN_API_URL", "").strip().rstrip("/")
 G_ID = "".join(c for c in os.environ.get("GREEN_API_ID", "") if c.isdigit())
 G_TOK = os.environ.get("GREEN_API_TOKEN", "").strip()
 GEM_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
@@ -16,7 +18,7 @@ SB_KEY = os.environ.get("SUPABASE_KEY", "").strip()
 
 def sb(m, t, p=None, q=""):
     if not SB_URL or not SB_KEY: return list()
-    u = "/".join((SB_URL, "rest", "v1", t)) + q
+    u = SB_URL + "/rest/v1/" + t + q
     h = {"apikey": SB_KEY, "Authorization": "Bearer " + SB_KEY, "Content-Type": "application/json", "Prefer": "return=representation"}
     try:
         r = requests.get(u, headers=h, timeout=10) if m == "GET" else requests.post(u, json=p, headers=h, timeout=10)
@@ -27,33 +29,32 @@ def sb(m, t, p=None, q=""):
 def ai_ask(p, s):
     if GROQ_KEY:
         try:
-            u_g = "/".join(("https:", "", "://groq.com", "openai", "v1", "chat", "completions"))
-            r = requests.post(u_g, json={"model": "llama-3.3-70b-versatile", "messages": list(({"role": "system", "content": s}, {"role": "user", "content": p})), "temperature": 0.4}, headers={"Authorization": "Bearer " + GROQ_KEY}, timeout=30)
+            r = requests.post("https://groq.com", json={"model": "llama-3.3-70b-versatile", "messages": list(({"role": "system", "content": s}, {"role": "user", "content": p})), "temperature": 0.4}, headers={"Authorization": "Bearer " + GROQ_KEY}, timeout=30)
             if r.status_code == 200: return r.json().get("choices", list()).pop(0).get("message", {}).get("content", "").strip()
         except Exception: pass
     if GEM_KEY:
         try:
-            u_m = "/".join(("https:", "", "://googleapis.com", "v1beta", "models", "gemini-2.5-flash:generateContent")) + "?key=" + GEM_KEY
+            u_m = "https://googleapis.com" + GEM_KEY
             r = requests.post(u_m, json={"contents": list(({"parts": list(({"text": s + "\n" + p},))},))}, timeout=30)
             if r.status_code == 200: return r.json().get("candidates", list()).pop(0).get("content", {}).get("parts", list()).pop(0).get("text", "").strip()
         except Exception: pass
     if OR_KEY:
         try:
-            u_o = "/".join(("https:", "", "openrouter.ai", "api", "v1", "chat", "completions"))
-            r = requests.post(u_o, json={"model": "openrouter/free", "messages": list(({"role": "system", "content": s}, {"role": "user", "content": p}))}, headers={"Authorization": "Bearer " + OR_KEY}, timeout=30)
+            r = requests.post("https://openrouter.ai", json={"model": "openrouter/free", "messages": list(({"role": "system", "content": s}, {"role": "user", "content": p}))}, headers={"Authorization": "Bearer " + OR_KEY}, timeout=30)
             if r.status_code == 200: return r.json().get("choices", list()).pop(0).get("message", {}).get("content", "").strip()
         except Exception: pass
     return "تم إعداد التقرير التنفيذي بنجاح عبر منظومة Albaraa Ai os."
 
 def send_msg(c, t):
-    if t:
-        parts = ("https:", "", "://greenapi.com", "waInstance" + G_ID, "sendMessage", G_TOK)
-        requests.post("/".join(parts), json={"chatId": c, "message": t}, timeout=15)
+    if t and G_URL:
+        u = G_URL + "/waInstance" + G_ID + "/sendMessage/" + G_TOK
+        requests.post(u, json={"chatId": c, "message": t}, timeout=15)
 
 def send_file(c, path, name, mime, cap):
-    parts = ("https:", "", "://greenapi.com", "waInstance" + G_ID, "sendFileByUpload", G_TOK)
-    with open(path, "rb") as f:
-        requests.post("/".join(parts), data={"chatId": c, "caption": cap}, files={"file": (name, f, mime)}, timeout=35)
+    if G_URL:
+        u = G_URL + "/waInstance" + G_ID + "/sendFileByUpload/" + G_TOK
+        with open(path, "rb") as f:
+            requests.post(u, data={"chatId": c, "caption": cap}, files={"file": (name, f, mime)}, timeout=35)
 
 def run_task(cid, msg, role, sname):
     t0, low, dtype = time.time(), msg.lower(), "استشارة هندسية"
@@ -101,7 +102,7 @@ def run_task(cid, msg, role, sname):
     sb("POST", "telemetry_kpis", {"user_id": cid, "user_role": role, "unit_used": "Data & GovTech" if role == "co_lead" else "Admin", "task_complexity": "متقدم", "response_time_sec": round(time.time() - t0, 2), "time_saved_min": 45, "user_growth_score": 90, "deliverable_type": dtype})
 
 def handle_all(e=None):
-    if request.method == "GET": return jsonify({"status": "online", "system": "Albaraa Ai os v13-Bulletproof"}), 200
+    if request.method == "GET": return jsonify({"status": "online", "system": "Albaraa Ai os v14-ZeroURLs"}), 200
     d = request.get_json(silent=True) or {}
     if d.get("typeWebhook") not in ("incomingMessageReceived", "outgoingMessageReceived"): return jsonify({"status": "skip"}), 200
     mid = d.get("idMessage", "")

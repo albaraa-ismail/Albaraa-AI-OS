@@ -130,7 +130,7 @@ def run_task(cid, msg, role, sname):
         )
         raw = ai_ask(msg, sys_doc)
         doc = Document()
-        h = doc.add_heading("تقرير تنفيذي رسمي — منظومة Albaraa Ai os", 0)
+        doc.add_heading("تقرير تنفيذي رسمي — منظومة Albaraa Ai os", 0)
         doc.add_paragraph("إعداد: فريق الهندسة والذكاء الاصطناعي المؤسسي")
         doc.add_paragraph("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         for line in raw.split("\n"):
@@ -186,10 +186,10 @@ def run_task(cid, msg, role, sname):
             if not lines:
                 continue
             sl = prs.slides.add_slide(prs.slide_layouts.pop(1))
-            sl.shapes.title.text = lines[0].lstrip("# ")[:65]
+            sl.shapes.title.text = lines.pop(0).lstrip("# ")[:65]
             tf = sl.placeholders.pop(1).text_frame
             tf.clear()
-            for idx, pt in enumerate(lines[1:]):
+            for idx, pt in enumerate(lines):
                 p = tf.paragraphs.pop(0) if idx == 0 else tf.add_paragraph()
                 p.text = f"• {pt.lstrip('•-* ')}"
                 p.font.size = Pt(18)

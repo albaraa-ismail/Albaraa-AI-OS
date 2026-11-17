@@ -1,6 +1,8 @@
 import os, requests, base64, json, time, threading, openpyxl
 from pptx import Presentation
 from pptx.util import Pt
+from docx import Document
+from duckduckgo_search import DDGS
 from flask import Flask, request, jsonify
 from main import MultiAgentSystem
 
@@ -32,12 +34,22 @@ def sb_req(method, table, payload=None, query=""):
         pass
     return list()
 
+def live_search(query):
+    try:
+        results = list()
+        with DDGS() as ddgs:
+            for r in ddgs.text(query, max_results=3):
+                results.append(f"- {r.get('title', '')}: {r.get('body', '')}")
+        return "\n".join(results)
+    except Exception:
+        return ""
+
 def call_groq(prompt, sys_role):
     url = dec("aHR0cHM6Ly9hcGkuZ3JvcS5jb20vb3BlbmFpL3YxL2NoYXQvY29tcGxldGlvbnM=")
     h = {"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"}
     body = {"model": "llama-3.3-70b-versatile", "messages": ({"role": "system", "content": sys_role}, {"role": "user", "content": prompt})}
     try:
-        r = requests.post(url, json=body, headers=h, timeout=25)
+        r = requests.post(url, json=body, headers=h, timeout=30)
         if r.status_code == 200:
             return r.json().get("choices", list()).pop(0).get("message", {}).get("content", "").strip()
     except Exception:
@@ -48,7 +60,7 @@ def call_gemini(prompt):
     base = dec("aHR0cHM6Ly9nZW5lcmF0aXZlbGFuZ3VhZ2UuZ29vZ2xlYXBpcy5jb20vdjFiZXRhL21vZGVscw==")
     url = f"{base}/gemini-2.5-flash:generateContent?key={GEM_KEY}"
     try:
-        r = requests.post(url, json={"contents": ({"parts": ({"text": prompt},)},)}, timeout=25)
+        r = requests.post(url, json={"contents": ({"parts": ({"text": prompt},)},)}, timeout=30)
         if r.status_code == 200:
             c = r.json().get("candidates", list())
             if c:
@@ -60,10 +72,10 @@ def call_gemini(prompt):
 def call_or(prompt, draft, lessons=""):
     url = dec("aHR0cHM6Ly9vcGVucm91dGVyLmFpL2FwaS92MS9jaGF0L2NvbXBsZXRpb25z")
     h = {"Authorization": f"Bearer {OR_KEY}", "Content-Type": "application/json"}
-    sys_m = "أنت وكيل الحوكمة والتصحيح الذاتي في Albaraa Ai os. راجع المسودة وحسّنها مستفيداً من الدروس:\n" + lessons
+    sys_m = "أنت وكيل الحوكمة والتصحيح الذاتي في Albaraa Ai os. راجع المسودة وحسّنها مستفيداً من الدروس السابقة:\n" + lessons
     body = {"model": "openrouter/free", "messages": ({"role": "system", "content": sys_m}, {"role": "user", "content": f"الطلب: {prompt}\nالمسودة:\n{draft}"})}
     try:
-        r = requests.post(url, json=body, headers=h, timeout=25)
+        r = requests.post(url, json=body, headers=h, timeout=30)
         if r.status_code == 200:
             return r.json().get("choices", list()).pop(0).get("message", {}).get("content", "").strip()
     except Exception:
@@ -103,7 +115,7 @@ def make_pptx(chat_id, prompt):
     prs = Presentation()
     s0 = prs.slides.add_slide(prs.slide_layouts.pop(0))
     s0.shapes.title.text = data.get("main_title", "عرض تقديمي")
-    s0.placeholders.pop(1).text = "إعداد نظام Albaraa Ai os"
+    s0.placeholders.pop(1).text = "إعداد منظومة Albaraa Ai os"
     for s in data.get("slides", list()):
         sl = prs.slides.add_slide(prs.slide_layouts.pop(1))
         sl.shapes.title.text = s.get("title", "")
@@ -115,6 +127,19 @@ def make_pptx(chat_id, prompt):
             p.font.size = Pt(20)
     prs.save("/tmp/Out.pptx")
     send_file(chat_id, "/tmp/Out.pptx", "Albaraa_Presentation.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "📽️ عرض تقديمي جاهز | Albaraa Ai os")
+
+def make_docx(chat_id, prompt):
+    sys_j = 'أعد JSON فقط: {"title": "عنوان التقرير", "sections": ({"heading": "عنوان فرعي", "content": "فقرة تفصيلية"},)}'
+    raw = call_groq(prompt, sys_j) or call_gemini(f"{sys_j}\n{prompt}")
+    data = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
+    doc = Document()
+    doc.add_heading(data.get("title", "تقرير رسمي"), 0)
+    doc.add_paragraph("إعداد: منظومة Albaraa Ai os الهندسية")
+    for sec in data.get("sections", list()):
+        doc.add_heading(sec.get("heading", ""), level=1)
+        doc.add_paragraph(sec.get("content", ""))
+    doc.save("/tmp/Out.docx")
+    send_file(chat_id, "/tmp/Out.docx", "Albaraa_Report.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "📄 مستند وورد رسمي جاهز | Albaraa Ai os")
 
 def process_task(chat_id, user_msg, role, sender_name):
     t0 = time.time()
@@ -148,44 +173,21 @@ def process_task(chat_id, user_msg, role, sender_name):
         send_msg(chat_id, "⏳ جاري إعداد ملف الإكسل...")
         make_excel(chat_id, user_msg)
         deliverable = "Excel"
+    elif any(k in low for k in ("وورد", "word", "docx", "تقرير رسمي", "خطاب")):
+        send_msg(chat_id, "⏳ جاري صياغة وتنسيق مستند الوورد...")
+        make_docx(chat_id, user_msg)
+        deliverable = "Word"
     else:
+        web_info = live_search(user_msg)
         past = sb_req("GET", "self_learning_logs", query="?order=id.desc&limit=3")
+        custom_ag = sb_req("GET", "agents_registry", query="?order=id.desc&limit=3")
         lessons = "\n".join(tuple(x.get("lesson_learned", "") for x in past))
+        extra_agents = "\n".join(tuple(f"{a.get('agent_name')}: {a.get('system_prompt')}" for a in custom_ag))
         sys_r = (
             "أنت منظومة Albaraa Ai os الهندسية (وحدات: علم البيانات، Python، Power BI، منصة بلدي، والمسيّرات والأنظمة الدفاعية). "
-            "إذا طلب المستخدم بناء منصة أو نظام أو أتمتة، صمم له الهيكل الكامل واكتب له الكود البرمجي الجاهز للتنفيذ خطوة بخطوة باللغة العربية."
+            f"الوكلاء الإضافيون المفعلون:\n{extra_agents}\n"
+            "إذا طلب المستخدم بناء منصة أو نظام أو كود، صمم له الهيكل واكتب له الكود البرمجي الكامل خطوة بخطوة باللغة العربية."
         )
-        draft = call_groq(user_msg, sys_r) or call_gemini(f"{sys_r}\n{user_msg}") or "تعذر الاتصال."
+        full_prompt = f"الطلب: {user_msg}\n\nنتائج البحث الحي من الإنترنت:\n{web_info}" if web_info else user_msg
+        draft = call_groq(full_prompt, sys_r) or call_gemini(f"{sys_r}\n{full_prompt}") or "تعذر الاتصال."
         ans = call_or(user_msg, draft, lessons) if OR_KEY else draft
-        sb_req("POST", "self_learning_logs", {"user_role": role, "task_type": "بناء وهندسة", "lesson_learned": f"تم بناء وتنفيذ طلب ({sender_name}): {user_msg[:50]}"})
-        send_msg(chat_id, f"🤖 *Albaraa Ai os — وحدة الهندسة والبناء*\n━━━━━━━━━━━━━━━━━━\n{ans}\n━━━━━━━━━━━━━━━━━━\n🧠 *التعلم الرجعي والذاكرة:* محدثة ✅")
-
-    elapsed = round(time.time() - t0, 2)
-    growth = min(99, 80 + (5 if deliverable != "تقرير وبناء هندسي" else 3))
-    sb_req("POST", "telemetry_kpis", {"user_id": chat_id, "user_role": role, "unit_used": "Data & GovTech" if role == "co_lead" else "Admin", "task_complexity": "بناء هندسي", "response_time_sec": elapsed, "time_saved_min": 60 if deliverable != "تقرير وبناء هندسي" else 30, "user_growth_score": growth, "deliverable_type": deliverable})
-
-@app.route("/", methods=("GET",))
-def home():
-    return jsonify({"status": "online", "version": "v4.3-async"}), 200
-
-@app.route("/whatsapp-webhook", methods=("POST",))
-def whatsapp_webhook():
-    data = request.get_json(silent=True) or {}
-    w_type = data.get("typeWebhook", "")
-    if w_type not in ("incomingMessageReceived", "outgoingMessageReceived"):
-        return jsonify({"status": "ignored_type"}), 200
-
-    msg_id = data.get("idMessage", "")
-    if not msg_id or msg_id in PROCESSED_IDS:
-        return jsonify({"status": "duplicate_blocked"}), 200
-    PROCESSED_IDS.add(msg_id)
-    if len(PROCESSED_IDS) > 500:
-        PROCESSED_IDS.clear()
-
-    wid = data.get("instanceData", {}).get("wid", "")
-    sender_d = data.get("senderData", {})
-    chat_id = sender_d.get("chatId") or data.get("chatId", "")
-    sender_name = sender_d.get("senderName", "أحمد عز الدين")
-    msg_d = data.get("messageData", {})
-    user_msg = (msg_d.get("textMessageData", {}).get("textMessage") or msg_d.get("extendedTextMessageData", {}).get("text") or "").strip()
-

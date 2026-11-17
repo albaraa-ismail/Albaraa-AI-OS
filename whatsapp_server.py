@@ -5,7 +5,7 @@ from main import MultiAgentSystem
 
 app = Flask(__name__)
 
-# بيانات الربط مع Green API
+# بيانات الربط مع Green API (يتم قراءتها تلقائياً من إعدادات Render)
 GREEN_API_ID = os.environ.get("GREEN_API_ID", "")
 GREEN_API_TOKEN = os.environ.get("GREEN_API_TOKEN", "")
 

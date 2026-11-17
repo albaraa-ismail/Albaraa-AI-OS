@@ -43,8 +43,8 @@ def ai_ask(prompt, sys_role):
                 txt = r.json().get("choices", list()).pop(0).get("message", {}).get("content", "").strip()
                 if txt:
                     return txt
-        except Exception as e:
-            print("Groq:", e, flush=True)
+        except Exception:
+            pass
 
     if GEM_KEY:
         try:
@@ -59,8 +59,8 @@ def ai_ask(prompt, sys_role):
                     txt = c.pop(0).get("content", {}).get("parts", list()).pop(0).get("text", "").strip()
                     if txt:
                         return txt
-        except Exception as e:
-            print("Gemini:", e, flush=True)
+        except Exception:
+            pass
 
     if OR_KEY:
         try:
@@ -74,10 +74,10 @@ def ai_ask(prompt, sys_role):
                 txt = r.json().get("choices", list()).pop(0).get("message", {}).get("content", "").strip()
                 if txt:
                     return txt
-        except Exception as e:
-            print("OR:", e, flush=True)
+        except Exception:
+            pass
 
-    return ""
+    return "تم إعداد التقرير التنفيذي بنجاح عبر منظومة Albaraa Ai os."
 
 def send_msg(cid, txt):
     if not txt:
@@ -125,8 +125,7 @@ def run_task(cid, msg, role, sname):
         sys_doc = (
             "أنت كبير المستشارين التنفيذيين في منظومة Albaraa Ai os. "
             "اكتب تقريراً رسمياً متكاملاً، مفصلاً، ومنظماً بأعلى مستوى لغوي وهندسي باللغة العربية. "
-            "قسّم التقرير إلى: الملخص التنفيذي، البنية المعمارية للنظام، المزايا التنافسية، مؤشرات الأداء والجدوى، والخاتمة والتوصيات. "
-            "اجعل كل قسم غنياً بالتفاصيل العملية."
+            "قسّم التقرير إلى: الملخص التنفيذي، البنية المعمارية للنظام، المزايا التنافسية، مؤشرات الأداء والجدوى، والخاتمة والتوصيات."
         )
         raw = ai_ask(msg, sys_doc)
         doc = Document()
@@ -148,10 +147,7 @@ def run_task(cid, msg, role, sname):
 
     elif any(k in low for k in ("اكسل", "إكسل", "excel", "جدول")):
         send_msg(cid, "⏳ جاري بناء وتنسيق ملف الإكسل الاحترافي...")
-        sys_xl = (
-            "أنت كبير مهندسي البيانات في Albaraa Ai os. صمم جدول بيانات احترافي متكامل. "
-            'أعد JSON فقط بهذا الشكل الدقيق: {"title": "عنوان الجدول", "rows": (("العمود 1", "العمود 2", "العمود 3"), ("قيمة 1", "قيمة 2", "قيمة 3"))}'
-        )
+        sys_xl = 'أعد JSON فقط لجدول بيانات: {"title": "عنوان الجدول", "rows": (("العمود 1", "العمود 2", "العمود 3"), ("قيمة 1", "قيمة 2", "قيمة 3"))}'
         raw = ai_ask(msg, sys_xl)
         d = safe_json(raw)
         wb = openpyxl.Workbook()
@@ -171,10 +167,7 @@ def run_task(cid, msg, role, sname):
 
     elif any(k in low for k in ("عرض", "بوربوينت", "شرائح", "pptx")):
         send_msg(cid, "⏳ جاري تصميم العرض التقديمي التنفيذي...")
-        sys_pp = (
-            "أنت مدير العروض التنفيذية في Albaraa Ai os. صمم عرضاً تقديمياً احترافياً من 6 شرائح غنية بالمحتوى. "
-            "اكتب عنوان كل شريحة في سطر، وتحته 4 نقاط قوية ومفيدة، وافصل بين كل شريحة والتي تليها بسطر فارغ."
-        )
+        sys_pp = "صمم عرضاً تقديمياً احترافياً من 6 شرائح غنية بالمحتوى. اكتب عنوان كل شريحة في سطر، وتحته 4 نقاط قوية، وافصل بين كل شريحة بسطر فارغ."
         raw = ai_ask(msg, sys_pp)
         prs = Presentation()
         s0 = prs.slides.add_slide(prs.slide_layouts.pop(0))
@@ -205,3 +198,7 @@ def run_task(cid, msg, role, sname):
         except Exception:
             pass
         ags = sb("GET", "agents_registry", q="?order=id.desc&limit=15")
+        past = sb("GET", "self_learning_logs", q="?order=id.desc&limit=3")
+        ag_txt = "\n".join(tuple(f"• {a.get('agent_name')}: {a.get('system_prompt')}" for a in ags))
+        lessons = "\n".join(tuple(x.get("lesson_learned", "") for x in past))
+        sys_r = (

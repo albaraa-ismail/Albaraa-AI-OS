@@ -10,26 +10,36 @@ GREEN_API_TOKEN = os.environ.get("GREEN_API_TOKEN", "").strip()
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 
 def ask_gemini(prompt):
-    host = "generativelanguage" + ".googleapis." + "com"
-    url = f"https://{host}/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     rules = (
         "أنت نظام تشغيل ذكاء اصطناعي متعدد الوكلاء باسم (Albaraa-AI-OS). "
         "أجب على طلب المستخدم بوضوح واختصار باللغة العربية، والتزم بقاعدة الحوكمة: "
         "اقترح الأدوات والحلول المجانية ومفتوحة المصدر فقط واستبعد المدفوعة مع ذكر السبب."
     )
     payload = {"contents": [{"parts": [{"text": f"{rules}\n\nالطلب: {prompt}"}]}]}
-    try:
-        res = requests.post(url, json=payload, timeout=20)
-        if res.status_code == 200:
-            data = res.json()
-            return data['candidates']['content']['parts']['text'].strip()
-        return f"تنبيه من المحرك ({res.status_code}): تعذر توليد الرد."
-    except Exception as e:
-        return f"خطأ تقني: {str(e)}"
+    
+    # تجربة أحدث نماذج Gemini المجانية تلقائياً لضمان عدم ظهور خطأ 404
+    models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"]
+    host = "generativelanguage" + ".googleapis." + "com"
+    
+    for model in models:
+        url = f"https://{host}/v1beta/models/{model}:generateContent?key={GEMINI_KEY}"
+        try:
+            res = requests.post(url, json=payload, timeout=20)
+            if res.status_code == 200:
+                data = res.json()
+                cands = data.get("candidates", [])
+                if cands:
+                    parts = cands.pop(0).get("content", {}).get("parts", [])
+                    if parts:
+                        return parts.pop(0).get("text", "").strip()
+        except Exception:
+            continue
+            
+    return "تعذر الوصول للمحرك حالياً، تأكد من صلاحية مفتاح GEMINI_API_KEY."
 
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({"status": "online", "engine": "Gemini-2.5"}), 200
+    return jsonify({"status": "online", "engine": "Gemini-Multi"}), 200
 
 @app.route("/whatsapp-webhook", methods=["POST"])
 def whatsapp_webhook():
@@ -52,7 +62,7 @@ def whatsapp_webhook():
             f"━━━━━━━━━━━━━━━━━━\n"
             f"🎯 *1. القائد:* تم استلام الطلب وتوجيهه.\n\n"
             f"🔍 *2. وكيل البحث:*\n{refined}\n\n"
-            f"🛡️ *3. التنفيذ والحوكمة (Gemini 2.5):*\n{ai_reply}\n\n"
+            f"🛡️ *3. التنفيذ والحوكمة (AI Agent):*\n{ai_reply}\n\n"
             f"📊 *4. التقييم والذاكرة:*\n"
             f"• الدقة: {eval_log['accuracy']} | الحالة: محفوظ ✅\n"
             f"━━━━━━━━━━━━━━━━━━"

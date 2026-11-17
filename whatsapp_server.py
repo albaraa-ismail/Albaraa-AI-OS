@@ -35,7 +35,7 @@ def ai_ask(prompt, sys_role):
         try:
             r = requests.post(
                 "https://groq.com",
-                json={"model": "llama-3.3-70b-versatile", "messages": ({"role": "system", "content": sys_role}, {"role": "user", "content": prompt}), "temperature": 0.4},
+                json={"model": "llama-3.3-70b-versatile", "messages": list(({"role": "system", "content": sys_role}, {"role": "user", "content": prompt})), "temperature": 0.4},
                 headers={"Authorization": f"Bearer {GROQ_KEY}"},
                 timeout=35
             )
@@ -50,7 +50,7 @@ def ai_ask(prompt, sys_role):
         try:
             r = requests.post(
                 f"https://googleapis.com{GEM_KEY}",
-                json={"contents": ({"parts": ({"text": f"{sys_role}\n\n{prompt}"},)},)},
+                json={"contents": list(({"parts": list(({"text": f"{sys_role}\n\n{prompt}"},))},))},
                 timeout=35
             )
             if r.status_code == 200:
@@ -66,7 +66,7 @@ def ai_ask(prompt, sys_role):
         try:
             r = requests.post(
                 "https://openrouter.ai",
-                json={"model": "openrouter/free", "messages": ({"role": "system", "content": sys_role}, {"role": "user", "content": prompt})},
+                json={"model": "openrouter/free", "messages": list(({"role": "system", "content": sys_role}, {"role": "user", "content": prompt}))},
                 headers={"Authorization": f"Bearer {OR_KEY}"},
                 timeout=35
             )
@@ -112,9 +112,9 @@ def run_task(cid, msg, role, sname):
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.sheet_view.rightToLeft = True
-        ws.append(("رقم العملية", "المستخدم", "الوحدة المنفذة", "زمن الاستجابة (ث)", "الوقت الموفر (دقيقة)", "مؤشر تطور المستخدم", "نوع المخرج"))
+        ws.append(list(("رقم العملية", "المستخدم", "الوحدة المنفذة", "زمن الاستجابة (ث)", "الوقت الموفر (دقيقة)", "مؤشر تطور المستخدم", "نوع المخرج")))
         for i in logs:
-            ws.append((i.get("id"), i.get("user_role"), i.get("unit_used"), i.get("response_time_sec"), i.get("time_saved_min"), i.get("user_growth_score"), i.get("deliverable_type")))
+            ws.append(list((i.get("id"), i.get("user_role"), i.get("unit_used"), i.get("response_time_sec"), i.get("time_saved_min"), i.get("user_growth_score"), i.get("deliverable_type"))))
         wb.save("/tmp/KPI.xlsx")
         send_file(cid, "/tmp/KPI.xlsx", "Albaraa_KPIs.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "📊 جدول القياس وتطور المستخدم | Albaraa Ai os")
         return
@@ -157,10 +157,10 @@ def run_task(cid, msg, role, sname):
             for r in d.get("rows"):
                 ws.append(list(r))
         else:
-            ws.append(("البند", "التفاصيل والبيانات الهندسية"))
+            ws.append(list(("البند", "التفاصيل والبيانات الهندسية")))
             for idx, line in enumerate(raw.split("\n"), 1):
                 if line.strip():
-                    ws.append((f"بند {idx}", line.strip().replace("**", "")))
+                    ws.append(list((f"بند {idx}", line.strip().replace("**", ""))))
         wb.save("/tmp/Out.xlsx")
         send_file(cid, "/tmp/Out.xlsx", "Albaraa_Data.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "📊 ملف إكسل احترافي جاهز | Albaraa Ai os")
         dtype = "Excel"
@@ -173,9 +173,9 @@ def run_task(cid, msg, role, sname):
         s0 = prs.slides.add_slide(prs.slide_layouts.pop(0))
         s0.shapes.title.text = "عرض استراتيجي — منظومة Albaraa Ai os"
         s0.placeholders.pop(1).text = msg[:70]
-        chunks = tuple(x.strip() for x in raw.split("\n\n") if x.strip())
-        for block in chunks[:7]:
-            lines = tuple(l.strip().replace("**", "") for l in block.split("\n") if l.strip())
+        chunks = list(x.strip() for x in raw.split("\n\n") if x.strip())
+        for block in chunks:
+            lines = list(l.strip().replace("**", "") for l in block.split("\n") if l.strip())
             if not lines:
                 continue
             sl = prs.slides.add_slide(prs.slide_layouts.pop(1))

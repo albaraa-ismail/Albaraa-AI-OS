@@ -17,10 +17,10 @@ def send_whatsapp_response(chat_id, text_to_send):
     headers = {'Content-Type': 'application/json'}
     try:
         response = requests.post(url, json=payload, headers=headers, timeout=15)
-        print("نتيجة الإرسال:", response.status_code, response.text)
+        print("نتيجة الإرسال:", response.status_code, response.text, flush=True)
         return response.status_code == 200
     except Exception as e:
-        print("خطأ في الإرسال:", str(e))
+        print("خطأ في الإرسال:", str(e), flush=True)
         return False
 
 @app.route("/", methods=["GET"])
@@ -33,12 +33,11 @@ def whatsapp_webhook():
     if not incoming_data:
         return jsonify({"status": "error"}), 400
         
+    type_wh = incoming_data.get('typeWebhook', '')
     wid = incoming_data.get('instanceData', {}).get('wid', '')
     body = incoming_data.get('body', {})
-    sender_data = body.get('senderData', {})
-    chat_id = sender_data.get('chatId') or body.get('chatId', '')
+    chat_id = body.get('senderData', {}).get('chatId') or body.get('chatId', '')
     
-    # استخراج النص من أي نوع رسالة
     msg_data = body.get('messageData', {})
     user_message = (
         msg_data.get('textMessageData', {}).get('textMessage') or
@@ -46,9 +45,9 @@ def whatsapp_webhook():
         ""
     ).strip()
 
-    # يرد فقط إذا كانت المحادثة مع نفسك وتحتوي على نص وليس رد البوت نفسه
+    print(f"فحص: type={type_wh} | wid={wid} | chat={chat_id} | msg={user_message}", flush=True)
+
     if wid and chat_id == wid and user_message and not user_message.startswith("*تقرير Albaraa-AI-OS*"):
-        print("تم قبول الرسالة للمعالجة:", user_message)
         constraints = "الالتزام بالأدوات المجانية ومفتوحة المصدر فقط"
         try:
             init_status = ai_os.chief.orchestrate_task(user_message, constraints)
@@ -84,7 +83,7 @@ def whatsapp_webhook():
             send_whatsapp_response(chat_id, whatsapp_response)
             return jsonify({"status": "success"}), 200
         except Exception as e:
-            print("خطأ في المعالجة:", str(e))
+            print("خطأ في المعالجة:", str(e), flush=True)
             return jsonify({"status": "error"}), 500
             
     return jsonify({"status": "ignored"}), 200

@@ -1,10 +1,8 @@
-import os
-import json
-
 class ChiefAgent:
     def __init__(self):
-        self.name = "Albaraa-Ai-os (Chief)"
+        self.name = "Albaraa-AI-OS (Chief)"
         
+    # استقبال الطلب وتوجيه المهام للوكلاء
     def orchestrate_task(self, query, constraints):
         print(f"[{self.name}] بدء استقبال الطلب وحوكمته...")
         return {

@@ -1,21 +1,17 @@
 import os
-import json
 import requests
 from flask import Flask, request, jsonify
-
-# استدعاء المسميات الأكاديمية الجديدة للوكلاء والمربوطة بمواد المنهج الدراسي
-from agents.expert_system_governance import get_governance_agent
-from agents.nlp_strategy_research import get_strategy_agent
-from agents.ml_operations_executor import get_executor_agent
+from main import MultiAgentSystem
 
 app = Flask(__name__)
 
-# 🔐 حوكمة البيانات وأمن المنصة الرقمية للرئيس البراء
-# (تنبيه: تأكد من شحن وتفعيل الـ Tokens الخاصة بحسابك في Green API لتأمين الرد)
-GREEN_API_ID = os.environ.get("GREEN_API_ID", "ضع_هنا_رقم_ID_الخاص_بك")
-GREEN_API_TOKEN = os.environ.get("GREEN_API_TOKEN", "ضع_هنا_رقم_TOKEN_الخاص_بك")
+# بيانات الربط مع Green API
+GREEN_API_ID = os.environ.get("GREEN_API_ID", "")
+GREEN_API_TOKEN = os.environ.get("GREEN_API_TOKEN", "")
 
-# 📨 دالة الرد التلقائي لإرجاع الرسالة والمخرجات مباشرة إلى رقمك في الواتساب
+ai_os = MultiAgentSystem()
+
+# إرسال الرد للواتساب
 def send_whatsapp_response(chat_id, text_to_send):
     url = f"https://green-api.com{GREEN_API_ID}/sendMessage/{GREEN_API_TOKEN}"
     payload = {
@@ -24,57 +20,73 @@ def send_whatsapp_response(chat_id, text_to_send):
     }
     headers = {'Content-Type': 'application/json'}
     try:
-        requests.post(url, json=payload, headers=headers, timeout=10)
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        return response.status_code == 200
     except Exception as e:
-        print(f"🚨 فشل إرسال الواتساب: {str(e)}")
+        print(f"خطأ في الإرسال: {str(e)}")
+        return False
 
+# فحص حالة السيرفر
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({"status": "online", "system": "Albaraa-AI-OS"}), 200
+
+# استقبال رسائل الواتساب
 @app.route("/whatsapp-webhook", methods=["POST"])
 def whatsapp_webhook():
-    # 🎯 تعديل ذكي لقراءة البيانات بصيغة JSON المتوافقة مع Green API
     incoming_data = request.get_json(silent=True)
     if not incoming_data:
-        return jsonify({"status": "error", "message": "No JSON data received"}), 400
+        return jsonify({"status": "error", "message": "No JSON data"}), 400
         
-    type_webhook = incoming_data.get('typeWebhook')
-    
-    # التحقق الحوكمي من أن الإشعار الوارد هو رسالة نصية قادمة من رقمك الثاني
-    if type_webhook == 'incomingMessageReceived':
+    if incoming_data.get('typeWebhook') == 'incomingMessageReceived':
         body = incoming_data.get('body', {})
         message_data = body.get('messageData', {})
         user_message = message_data.get('textMessageData', {}).get('textMessage', '').strip()
         chat_id = body.get('senderData', {}).get('chatId', '')
         
         if user_message:
-            system_constraints = "يجب الالتزام بالخيارات المجانية ومفتوحة المصدر وحظر الأدوات المدفوعة"
-            
+            constraints = "الالتزام بالأدوات المجانية ومفتوحة المصدر فقط"
             try:
-                # 🧠 استدعاء وتشغيل عقل الوكلاء بالمسميات المعتمدة للكلية
-                governance_manager = get_governance_agent()
-                strategy_manager = get_strategy_agent()
-                executor_manager = get_executor_agent()
+                # تشغيل دورة الوكلاء
+                init_status = ai_os.chief.orchestrate_task(user_message, constraints)
+                refined_query = ai_os.research.refine_query(user_message, constraints)
                 
-                # فرز البيانات ومحاكاة فلترة الأدوات بناءً على حظر الأدوات المدفوعة
+                mock_web_data = [
+                    {"name": "GitHub Copilot", "type": "Paid"},
+                    {"name": "VS Code Core", "type": "Free"},
+                    {"name": "Ollama Local LLM", "type": "Free"},
+                    {"name": "Replit Agent", "type": "Paid"}
+                ]
+                approved, blocked = ai_os.governance.audit_results(mock_web_data, constraints)
+                build_log = ai_os.builder.generate_code_structure("AI Agent Framework")
+                eval_log = ai_os.trainer.evaluate_performance("Execution OK")
+                
+                # تجهيز نص الرد
+                approved_names = ", ".join([t['name'] for t in approved])
+                blocked_names = ", ".join([t['name'] for t in blocked])
+                
                 whatsapp_response = (
-                    f"🤖 *مرحباً بك في منصة Albaraa-AI-OS السحابية*\n"
-                    f"-----------------------------------------\n"
-                    f"🔍 *تم استلام أمرك وجاري تنقيحه عبر الوكلاء:*\n {user_message}\n\n"
-                    f"⚖️ *قرار وكيل الحوكمة والتشريعات (النظم الخبيرة):*\n"
-                    f"✅ الأدوات المعتمدة والمجانية: [VS Code Core, Ollama Local LLM]\n"
-                    f"❌ الأدوات المحجوبة والمدفوعة: [GitHub Copilot]\n"
-                    f"-----------------------------------------\n"
-                    f"🛡️ (SECURITY CHECK: PASS) - تم المعالجة والحفظ بأمان في الذاكرة السحابية."
+                    f"*نظام Albaraa-AI-OS*\n"
+                    f"--------------------\n"
+                    f"*القائد ({init_status['orchestrator']}):* تم استلام الطلب.\n\n"
+                    f"*البحث ({ai_os.research.name}):* {refined_query}\n\n"
+                    f"*الحوكمة ({ai_os.governance.name}):*\n"
+                    f"- المعتمد: [{approved_names}]\n"
+                    f"- المحجوب: [{blocked_names}]\n\n"
+                    f"*البناء ({ai_os.builder.name}):* {build_log}\n\n"
+                    f"*التقييم ({ai_os.trainer.name}):* الدقة {eval_log['accuracy']}\n"
+                    f"--------------------\n"
+                    f"تم حفظ العملية في الذاكرة."
                 )
                 
-                # إطلاق الإشارة وإرسال الرد التلقائي الفوري حياً لـ واتساب جوالك
                 send_whatsapp_response(chat_id, whatsapp_response)
-                return jsonify({"status": "success", "reply": "Message processed and sent"})
+                return jsonify({"status": "success"}), 200
                 
             except Exception as e:
-                # إرسال تنبيه في حال وجود خطأ في تهيئة الأيجنت
-                send_whatsapp_response(chat_id, f"⚠️ واجه النظام خطأ برمجياً أثناء استدعاء شخصيات الوكلاء: {str(e)}")
+                send_whatsapp_response(chat_id, f"حدث خطأ في النظام: {str(e)}")
                 return jsonify({"status": "error", "message": str(e)}), 500
                 
-    return jsonify({"status": "ignored", "message": "Not an incoming text message"}), 200
+    return jsonify({"status": "ignored"}), 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

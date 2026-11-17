@@ -3,3 +3,5 @@ requests
 gunicorn
 openpyxl
 python-pptx
+python-docx
+duckduckgo-search

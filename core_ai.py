@@ -5,8 +5,14 @@ import requests
 
 logger = logging.getLogger("CoreAI")
 
-# إعدادات Green-API مع رابط افتراضي ذكي في حال عدم وجود GREEN_API_URL في Render
-G_URL = (os.environ.get("GREEN_API_URL") or "https://green-api.com").strip().rstrip("/")
+# بناء الروابط برمجيًا لحمايتها من اختصار متصفح الآيفون
+DEFAULT_G_URL = "".join(["https:/", "/api.green-api.", "com"])
+GROQ_API_URL = "".join(["https:/", "/api.groq.", "com/openai/v1/chat/completions"])
+GEMINI_BASE_URL = "".join(["https:/", "/generativelanguage.googleapis.", "com/v1beta/models/"])
+OPENROUTER_API_URL = "".join(["https:/", "/openrouter.", "ai/api/v1/chat/completions"])
+
+# إعدادات Green-API مع رابط افتراضي ذكي
+G_URL = (os.environ.get("GREEN_API_URL") or DEFAULT_G_URL).strip().rstrip("/")
 G_ID = os.environ.get("GREEN_API_ID", "").strip()
 G_TOK = os.environ.get("GREEN_API_TOKEN", "").strip()
 
@@ -17,11 +23,9 @@ OR_KEY = os.environ.get("OPENROUTER_API_KEY", "").strip()
 SB_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
 SB_KEY = os.environ.get("SUPABASE_KEY", "").strip()
 
-# جلسة اتصال مستمرة لتسريع الطلبات وتقليل زمن الاستجابة
 SESSION = requests.Session()
 
 def sb(method: str, table: str, payload=None, q: str = ""):
-    """التواصل السريع والآمن مع قاعدة بيانات Supabase"""
     if not SB_URL or not SB_KEY:
         return []
     url = f"{SB_URL}/rest/v1/{table}{q}"
@@ -44,15 +48,13 @@ def sb(method: str, table: str, payload=None, q: str = ""):
     return []
 
 def ai_ask(prompt: str, system_prompt: str) -> str:
-    """محرك ذكاء اصطناعي متعدد الطبقات مع انتقال فوري (Fallback) عند تعطل أي مزود"""
-    
     # 1. الطبقة الأولى: Groq (فائق السرعة)
     if GROQ_KEY:
         groq_models = ["llama-3.1-8b-instant", "gemma2-9b-it", "mixtral-8x7b-32768"]
         for model in groq_models:
             try:
                 res = SESSION.post(
-                    "https://groq.com",
+                    GROQ_API_URL,
                     json={
                         "model": model,
                         "messages": [
@@ -70,12 +72,12 @@ def ai_ask(prompt: str, system_prompt: str) -> str:
             except Exception as e:
                 logger.warning(f"Groq ({model}) exception: {e}")
 
-    # 2. الطبقة الثانية: Google Gemini (نموذج 2.5 Flash الرسمي والسريع)
+    # 2. الطبقة الثانية: Google Gemini
     if GEM_KEY:
         gemini_models = ["gemini-2.5-flash", "gemini-2.0-flash"]
         for g_model in gemini_models:
             try:
-                url = f"https://googleapis.com{g_model}:generateContent?key={GEM_KEY}"
+                url = f"{GEMINI_BASE_URL}{g_model}:generateContent?key={GEM_KEY}"
                 res = SESSION.post(
                     url,
                     json={
@@ -89,11 +91,11 @@ def ai_ask(prompt: str, system_prompt: str) -> str:
             except Exception as e:
                 logger.warning(f"Gemini ({g_model}) exception: {e}")
 
-    # 3. الطبقة الثالثة: OpenRouter (الاحتياطي الشامل)
+    # 3. الطبقة الثالثة: OpenRouter
     if OR_KEY:
         try:
             res = SESSION.post(
-                "https://openrouter.ai",
+                OPENROUTER_API_URL,
                 json={
                     "model": "openrouter/free",
                     "messages": [
@@ -113,7 +115,6 @@ def ai_ask(prompt: str, system_prompt: str) -> str:
     return "⚠️ تعذر الاتصال بمحركات الذكاء الاصطناعي حاليًا، يرجى المحاولة بعد قليل."
 
 def send_msg(chat_id: str, text: str):
-    """إرسال الرسائل النصية عبر Green-API مع إعادة محاولة تلقائية وتسجيل دقيق"""
     if not text or not chat_id:
         return
     if not G_ID or not G_TOK:
@@ -136,7 +137,6 @@ def send_msg(chat_id: str, text: str):
         time.sleep(1)
 
 def send_file(chat_id: str, path: str, name: str, mime: str, caption: str):
-    """رفع وإرسال الملفات (Word, Excel, PowerPoint) عبر Green-API"""
     if not G_ID or not G_TOK:
         logger.error("Missing GREEN_API_ID or GREEN_API_TOKEN for file upload!")
         return

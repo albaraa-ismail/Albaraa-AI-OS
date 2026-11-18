@@ -231,4 +231,169 @@ def edit_uploaded_excel(cid: str, file_path: str, orig_name: str, msg: str):
                         ws.cell(row=r, column=col_idx).value = val
             for r_str, r_val in (op.get("row_updates") or {}).items():
                 ws.cell(row=int(r_str), column=col_idx).value = r_val
+    clean_orig = orig_name if not orig_name.startswith("%") else "Employees_Updated.xlsx"
+    out_name = f"Modified_{clean_orig}" if not clean_orig.startswith("Modified_") else clean_orig
+    if not out_name.endswith(".xlsx"):
+        out_name += ".xlsx"
+    out_path = f"/tmp/{out_name}"
+    wb.save(out_path)
+    total_rows = max(0, wb.active.max_row - 1)
+    send_file(cid, out_path, out_name, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"✅ تم تعديل الملف بالكامل مع الحفاظ على جميع السجلات ({total_rows} سجل)")
+
+def make_ppt(cid, msg):
+    send_msg(cid, "⏳ جاري تصميم العرض التقديمي الاحترافي (PowerPoint)...")
+    sys_prompt = (
+        "أنت مصمم عروض تقديمية استراتيجية. صمم عرضاً تقديمياً متكاملاً من 6 شرائح باللغة العربية. "
+        "أرجع النتيجة بصيغة JSON فقط بدون أي مقدمات بهذا الهيكل الدقيق:\n"
+        '{"deck_title": "عنوان العرض الرئيسي", "subtitle": "وصف مختصر للعرض", '
+        '"slides": [{"title": "عنوان الشريحة", "points": ["نقطة مركزة 1", "نقطة مركزة 2", "نقطة مركزة 3", "نقطة مركزة 4"]}]}'
+    )
+    raw = ai_ask(msg, sys_prompt)
+    data = _extract_json(raw)
+
+    prs = Presentation()
+    prs.slide_width = Inches(13.333)
+    prs.slide_height = Inches(7.5)
+    blank_layout = prs.slide_layouts[6]
+
+    NAVY = RGBColor(15, 23, 42)
+    ROYAL = RGBColor(30, 58, 138)
+    GOLD = RGBColor(217, 119, 6)
+    WHITE = RGBColor(255, 255, 255)
+    SLATE = RGBColor(51, 65, 85)
+    BG_LIGHT = RGBColor(248, 250, 252)
+
+    deck_title = data.get("deck_title", "عرض استراتيجي متكامل") if isinstance(data, dict) else "عرض تقديمي"
+    deck_sub = data.get("subtitle", "منظومة Albaraa AI OS") if isinstance(data, dict) else msg[:80]
+    slides_data = data.get("slides", []) if isinstance(data, dict) else []
+
+    if not slides_data:
+        slides_data = [{"title": "ملخص العرض", "points": [l.strip() for l in raw.split("\n") if l.strip()][:5]}]
+
+    s0 = prs.slides.add_slide(blank_layout)
+    bg0 = s0.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, prs.slide_width, prs.slide_height)
+    bg0.fill.solid()
+    bg0.fill.fore_color.rgb = NAVY
+    bg0.line.fill.background()
+
+    accent_bar = s0.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(12.8), 0, Inches(0.533), prs.slide_height)
+    accent_bar.fill.solid()
+    accent_bar.fill.fore_color.rgb = GOLD
+    accent_bar.line.fill.background()
+
+    tb0 = s0.shapes.add_textbox(Inches(1.2), Inches(2.2), Inches(10.8), Inches(2.0))
+    tf0 = tb0.text_frame
+    tf0.word_wrap = True
+    p0 = tf0.paragraphs[0]
+    p0.alignment = PP_ALIGN.RIGHT
+    r0 = p0.add_run()
+    r0.text = deck_title
+    r0.font.size = Pt(40)
+    r0.font.bold = True
+    r0.font.color.rgb = WHITE
+
+    tb_sub = s0.shapes.add_textbox(Inches(1.2), Inches(4.3), Inches(10.8), Inches(1.2))
+    tf_sub = tb_sub.text_frame
+    tf_sub.word_wrap = True
+    ps = tf_sub.paragraphs[0]
+    ps.alignment = PP_ALIGN.RIGHT
+    rs = ps.add_run()
+    rs.text = f"{deck_sub}\nإعداد: منظومة Albaraa AI OS"
+    rs.font.size = Pt(20)
+    rs.font.color.rgb = RGBColor(251, 191, 36)
+
+    for idx, sl_info in enumerate(slides_data, start=1):
+        sl = prs.slides.add_slide(blank_layout)
+        bg = sl.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, prs.slide_width, prs.slide_height)
+        bg.fill.solid()
+        bg.fill.fore_color.rgb = BG_LIGHT
+        bg.line.fill.background()
+
+        top_hdr = sl.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, prs.slide_width, Inches(1.25))
+        top_hdr.fill.solid()
+        top_hdr.fill.fore_color.rgb = ROYAL
+        top_hdr.line.fill.background()
+
+        gold_line = sl.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, Inches(1.25), prs.slide_width, Inches(0.08))
+        gold_line.fill.solid()
+        gold_line.fill.fore_color.rgb = GOLD
+        gold_line.line.fill.background()
+
+        t_box = sl.shapes.add_textbox(Inches(0.8), Inches(0.25), Inches(11.7), Inches(0.8))
+        t_tf = t_box.text_frame
+        t_tf.word_wrap = True
+        tp = t_tf.paragraphs[0]
+        tp.alignment = PP_ALIGN.RIGHT
+        tr = tp.add_run()
+        tr.text = sl_info.get("title", f"محور رقم {idx}")
+        tr.font.size = Pt(26)
+        tr.font.bold = True
+        tr.font.color.rgb = WHITE
+
+        card = sl.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.8), Inches(1.7), Inches(11.7), Inches(4.9))
+        card.fill.solid()
+        card.fill.fore_color.rgb = WHITE
+        card.line.color.rgb = RGBColor(203, 213, 225)
+
+        c_box = sl.shapes.add_textbox(Inches(1.2), Inches(2.0), Inches(10.9), Inches(4.3))
+        c_tf = c_box.text_frame
+        c_tf.word_wrap = True
+
+        for p_idx, pt_text in enumerate(sl_info.get("points", [])):
+            p = c_tf.paragraphs[0] if p_idx == 0 else c_tf.add_paragraph()
+            p.alignment = PP_ALIGN.RIGHT
+            p.space_after = Pt(18)
+            run = p.add_run()
+            run.text = f"◆  {pt_text}"
+            run.font.size = Pt(20)
+            run.font.color.rgb = SLATE
+
+        ftr = sl.shapes.add_textbox(Inches(0.8), Inches(6.9), Inches(11.7), Inches(0.4))
+        ftr_p = ftr.text_frame.paragraphs[0]
+        ftr_p.alignment = PP_ALIGN.LEFT
+        ftr_r = ftr_p.add_run()
+        ftr_r.text = f"Albaraa AI OS  |  شريحة {idx}"
+        ftr_r.font.size = Pt(12)
+        ftr_r.font.color.rgb = RGBColor(100, 116, 139)
+
+    path = "/tmp/Albaraa_Presentation.pptx"
+    prs.save(path)
+    send_file(cid, path, "Albaraa_Presentation.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", f"📽️ {deck_title}")
+
+def make_software(cid, msg):
+    send_msg(cid, "⏳ جاري هندسة وبناء البرنامج وتجهيز ملفات المشروع...")
+    sys_prompt = (
+        "أنت مهندس برمجيات خبير (Full-Stack Architect). ابنِ برنامجاً متكاملاً ونظيفاً وجاهزاً للتشغيل بناءً على طلب المستخدم. "
+        "أرجع النتيجة بصيغة JSON فقط بدون أي كلام خارجها بهذا الهيكل:\n"
+        '{"project_name": "اسم_المشروع_بالانجليزية", "summary": "شرح مختصر بالعربية لكيفية التشغيل والمزايا", '
+        '"files": [{"filename": "index.html", "content": "الكود الكامل هنا"}]}'
+    )
+    raw = ai_ask(msg, sys_prompt)
+    data = _extract_json(raw)
+
+    proj_name = "Albaraa_Project"
+    summary = "تم بناء المشروع البرمجي بنجاح."
+    files_list = []
+
+    if isinstance(data, dict) and data.get("files"):
+        proj_name = re.sub(r"[^a-zA-Z0-9_-]", "_", data.get("project_name", "Albaraa_Project"))[:30]
+        summary = data.get("summary", summary)
+        files_list = data["files"]
+    else:
+        files_list = [{"filename": "app.py", "content": raw}]
+
+    if len(files_list) == 1:
+        fname = files_list[0].get("filename", "program.py")
+        fpath = f"/tmp/{fname}"
+        with open(fpath, "w", encoding="utf-8") as f:
+            f.write(files_list[0].get("content", ""))
+        send_file(cid, fpath, fname, "application/octet-stream", f"💻 تم بناء الملف البرمجي: {fname}\n\n{summary}")
+    else:
+        zip_name = f"{proj_name}.zip"
+        zip_path = f"/tmp/{zip_name}"
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for item in files_list:
+                fn = item.get("filename", "code.txt")
+                zf.writestr(fn, item.get("content", ""))
+        send_file(cid, zip_path, zip_name, "application/zip", f"💻 حزمة المشروع البرمجي جاهزة: {zip_name}\n\n{summary}")
 

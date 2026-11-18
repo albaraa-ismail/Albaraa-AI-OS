@@ -6,15 +6,16 @@ from core_ai import sb, ai_ask, send_msg, send_file
 ADMIN_CID = os.environ.get("ADMIN_PHONE", "966575475336").strip() + "@c.us"
 
 def propose_agent(cid, req_text, requester):
-    spec = ai_ask(req_text, "صمم هيكل قسم ووكيل ذكي متخصص. اكتب: 1- اسم القسم 2- اسم الوكيل 3- المهام 4- ضوابط الأمان:")
-    sb("POST", "agents_registry", {"unit_name": "قيد_الاعتماد", "agent_name": req_text[:30], "sub_agents": requester, "system_prompt": spec})
-    send_msg(cid, "🛠️ *تم رصد احتياج جديد.*\nجاري هندسة قسم ووكيل متخصص آمن وتجهيزه للاعتماد...")
-    send_msg(ADMIN_CID, f"🔐 *طلب اعتماد قسم جديد*\n👤 *المرسل:* {requester}\n📌 *الطلب:* {req_text}\n\n{spec}\n\n✅ للتثبيت أرسل: *موافق*")
+    clean_name = ai_ask(req_text, "استخرج اسماً مهنياً مختصراً ونظيفاً باللغة العربية الفصحى لهذا القسم أو الوكيل (من 3 إلى 5 كلمات فقط بدون أي علامات ترقيم أو شرح):").replace('"', '').replace('*', '').strip()[:50]
+    spec = ai_ask(req_text, f"صمم هيكل قسم ووكيل ذكي باسم ({clean_name}). اكتب: 1- المهام الرئيسية 2- الصلاحيات 3- ضوابط الأمان:")
+    sb("POST", "agents_registry", {"unit_name": "قيد_الاعتماد", "agent_name": clean_name, "sub_agents": requester, "system_prompt": spec})
+    send_msg(cid, f"🛠️ *تم رصد احتياج جديد:* {clean_name}\nجاري هندسة القسم وتجهيزه للاعتماد...")
+    send_msg(ADMIN_CID, f"🔐 *طلب اعتماد قسم جديد*\n👤 *المرسل:* {requester}\n🏷️ *الاسم المقترح:* {clean_name}\n\n{spec}\n\n✅ للتثبيت أرسل: *موافق*")
 
 def approve_pending(cid):
     pending = sb("GET", "agents_registry", q="?unit_name=eq.قيد_الاعتماد&order=id.desc&limit=1")
     if not pending: send_msg(cid, "ℹ️ لا توجد أقسام بانتظار الاعتماد."); return
-    item = pending[0]
+    item = pending.pop(0)
     sb("PATCH", "agents_registry", {"unit_name": "قسم_معتمد_نشط"}, q=f"?id=eq.{item['id']}")
     send_msg(cid, f"✅ *تم التثبيت والتفعيل:* القسم (*{item['agent_name']}*) نشط الآن.")
 
@@ -60,4 +61,6 @@ def periodic_analytics(cid):
     total = len(logs)
     avg_time = round(sum(float(x.get("response_time_sec", 2)) for x in logs) / total, 2)
     saved_hrs = round(sum(int(x.get("time_saved_min", 45)) for x in logs) / 60, 1)
-    send_msg(cid, f"📈 *التقرير الدوري لقياس الأداء*\n━━━━━━━━━━\n• *المهام المنجزة:* {total}\n• *سرعة الإنجاز:* {avg_time} ثانية\n• *الوقت الموفر:* {saved_hrs} ساعة\n• *تطور الأداء:* ارتفع من {logs[0].get('user_growth_score', 70)}% إلى {logs[-1].get('user_growth_score', 95)}%")
+    first_score = logs.pop(0).get("user_growth_score", 70)
+    last_score = logs[-1].get("user_growth_score", 95) if logs else first_score
+    send_msg(cid, f"📈 *التقرير الدوري لقياس الأداء*\n━━━━━━━━━━\n• *المهام المنجزة:* {total}\n• *سرعة الإنجاز:* {avg_time} ثانية\n• *الوقت الموفر:* {saved_hrs} ساعة\n• *تطور الأداء:* ارتفع من {first_score}% إلى {last_score}%")

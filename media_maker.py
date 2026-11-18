@@ -1,4 +1,4 @@
-import os, asyncio
+import os, asyncio, subprocess
 from pptx import Presentation
 from pptx.util import Inches, Pt
 import edge_tts
@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
 from bidi.algorithm import get_display
 import plotly.graph_objects as go
-from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips
+import imageio_ffmpeg
 from core_ai import ai_ask, send_msg, send_file
 from office_tools import today_dates
 
@@ -66,48 +66,54 @@ def make_ppt(cid, msg):
 
 def make_video(cid, msg):
     send_msg(cid, "🎬 جاري إنتاج الفيديو الاحترافي بالصوت البشري والرسوم...")
-    script = ai_ask(msg, "اكتب سيناريو فيديو احترافي متكامل من 7 مشاهد متسلسلة وطويلة. لكل مشهد اكتب سطراً واحداً بصيغة: العنوان | النص الصوتي المفصل (3 إلى 4 جمل كاملة باللغة العربية الفصحى الواضحة):")
+    script = ai_ask(msg, "اكتب سيناريو فيديو احترافي متكامل من 6 مشاهد متسلسلة. لكل مشهد اكتب سطراً واحداً بصيغة: العنوان | النص الصوتي المفصل (3 جمل كاملة باللغة العربية الفصحى الواضحة):")
     scenes = []
     for l in script.split("\n"):
         if "|" in l:
             parts = [p.strip().replace("**", "") for p in l.split("|") if p.strip()]
             if len(parts) >= 2: scenes.append((parts[0], parts[1]))
-    if not scenes: scenes = [(msg[:35], script[:500])]
+    if not scenes: scenes = [(msg[:35], script[:400])]
 
-    clips, temp_files = [], []
-    colors = [(15, 32, 56), (22, 52, 72), (28, 38, 64), (18, 48, 58), (25, 35, 55), (14, 42, 62), (20, 40, 65)]
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    seg_files, temp_files = [], []
+    colors = [(15, 32, 56), (22, 52, 72), (28, 38, 64), (18, 48, 58), (25, 35, 55), (14, 42, 62)]
 
-    for idx, (title, voice_txt) in enumerate(scenes[:8]):
-        img_path, aud_path = f"/tmp/sc_{idx}.png", f"/tmp/sc_{idx}.mp3"
-        temp_files.extend([img_path, aud_path])
+    for idx, (title, voice_txt) in enumerate(scenes[:6]):
+        img_path, aud_path, seg_path = f"/tmp/sc_{idx}.png", f"/tmp/sc_{idx}.mp3", f"/tmp/seg_{idx}.mp4"
+        temp_files.extend([img_path, aud_path, seg_path])
         _make_audio(voice_txt, aud_path)
-        aud_clip = AudioFileClip(aud_path)
 
-        img = Image.new("RGB", (1280, 720), color=colors[idx % len(colors)])
+        img = Image.new("RGB", (854, 480), color=colors[idx % len(colors)])
         draw = ImageDraw.Draw(img)
         try:
-            f_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 44)
-            f_body = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 28)
+            f_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 32)
+            f_body = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
         except Exception:
             f_title = f_body = ImageFont.load_default()
 
-        draw.rectangle([40, 40, 1240, 680], outline=(110, 190, 255), width=3)
-        draw.text((640, 130), _ar_txt(title[:45]), fill=(255, 215, 0), font=f_title, anchor="mm")
+        draw.rectangle([25, 25, 829, 455], outline=(110, 190, 255), width=2)
+        draw.text((427, 85), _ar_txt(title[:42]), fill=(255, 215, 0), font=f_title, anchor="mm")
 
         words = voice_txt.split()
-        lines = [" ".join(words[i:i+9]) for i in range(0, len(words), 9)]
-        y_pos = 270
+        lines = [" ".join(words[i:i+8]) for i in range(0, len(words), 8)]
+        y_pos = 185
         for ln in lines[:6]:
-            draw.text((640, y_pos), _ar_txt(ln), fill=(255, 255, 255), font=f_body, anchor="mm")
-            y_pos += 55
+            draw.text((427, y_pos), _ar_txt(ln), fill=(255, 255, 255), font=f_body, anchor="mm")
+            y_pos += 38
 
         img.save(img_path)
-        clips.append(ImageClip(img_path).set_duration(aud_clip.duration + 0.5).set_audio(aud_clip))
+        subprocess.run([ffmpeg, "-y", "-loop", "1", "-i", img_path, "-i", aud_path, "-c:v", "libx264", "-tune", "stillimage", "-c:a", "aac", "-b:a", "128k", "-pix_fmt", "yuv420p", "-shortest", seg_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if os.path.exists(seg_path): seg_files.append(seg_path)
 
-    final_vid = concatenate_videoclips(clips, method="compose")
+    list_file = "/tmp/concat.txt"
+    temp_files.append(list_file)
+    with open(list_file, "w") as f:
+        for s in seg_files: f.write(f"file '{s}'\n")
+
     out_vid = "/tmp/Video_Out.mp4"
-    final_vid.write_videofile(out_vid, fps=15, codec="libx264", audio_codec="aac", logger=None)
-    send_file(cid, out_vid, "Video_Presentation.mp4", "video/mp4", "🎬 الفيديو جاهز")
+    subprocess.run([ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", list_file, "-c", "copy", out_vid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if os.path.exists(out_vid):
+        send_file(cid, out_vid, "Video_Presentation.mp4", "video/mp4", "🎬 الفيديو جاهز")
 
     for f in temp_files + [out_vid]:
         if os.path.exists(f):

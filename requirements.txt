@@ -5,3 +5,5 @@ openpyxl
 python-pptx
 python-docx
 duckduckgo-search
+pypdf
+beautifulsoup4

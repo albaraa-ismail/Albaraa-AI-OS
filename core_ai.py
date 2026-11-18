@@ -26,14 +26,14 @@ def ai_ask(p, s):
         try:
             u = "".join(["https:/", "/api.groq.", "com/openai/v1/chat/completions"])
             r = requests.post(u, json={"model": "llama-3.1-8b-instant", "messages": [{"role": "system", "content": clean_s}, {"role": "user", "content": p}]}, headers={"Authorization": f"Bearer {GROQ_KEY}"}, timeout=20)
-            if r.status_code == 200: return r.json()["choices"][0]["message"]["content"].strip()
+            if r.status_code == 200: return r.json()["choices"].pop(0)["message"]["content"].strip()
             print("Groq Err:", r.text)
         except Exception as e: print("Groq Ex:", e)
     if GEM_KEY:
         try:
             u = "".join(["https:/", "/generativelanguage.googleapis.", "com/v1beta/models/gemini-3.8-flash:generateContent?key=", GEM_KEY])
             r = requests.post(u, json={"contents": [{"parts": [{"text": f"{clean_s}\n{p}"}]}]}, timeout=25)
-            if r.status_code == 200: return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            if r.status_code == 200: return r.json()["candidates"].pop(0)["content"]["parts"].pop(0)["text"].strip()
             print("Gem Err:", r.text)
         except Exception as e: print("Gem Ex:", e)
     return "تم إنجاز المهمة بنجاح."

@@ -24,21 +24,21 @@ def ai_ask(p, s):
         try:
             u = "".join(["https:/", "/api.groq.", "com/openai/v1/chat/completions"])
             r = requests.post(u, json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "system", "content": s}, {"role": "user", "content": p}]}, headers={"Authorization": f"Bearer {GROQ_KEY}"}, timeout=25)
-            if r.status_code == 200: return r.json()["choices"]["message"]["content"].strip()
+            if r.status_code == 200: return r.json()["choices"][0]["message"]["content"].strip()
             print("Groq Err:", r.text)
         except Exception as e: print("Groq Ex:", e)
     if GEM_KEY:
         try:
             u = "".join(["https:/", "/generativelanguage.googleapis.", "com/v1beta/models/gemini-2.5-flash:generateContent?key=", GEM_KEY])
             r = requests.post(u, json={"contents": [{"parts": [{"text": f"{s}\n{p}"}]}]}, timeout=25)
-            if r.status_code == 200: return r.json()["candidates"]["content"]["parts"]["text"].strip()
+            if r.status_code == 200: return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
             print("Gem Err:", r.text)
         except Exception as e: print("Gem Ex:", e)
     if OR_KEY:
         try:
             u = "".join(["https:/", "/openrouter.", "ai/api/v1/chat/completions"])
             r = requests.post(u, json={"model": "openrouter/free", "messages": [{"role": "system", "content": s}, {"role": "user", "content": p}]}, headers={"Authorization": f"Bearer {OR_KEY}"}, timeout=25)
-            if r.status_code == 200: return r.json()["choices"]["message"]["content"].strip()
+            if r.status_code == 200: return r.json()["choices"][0]["message"]["content"].strip()
         except Exception as e: print("OR Ex:", e)
     return "تمت المعالجة عبر Albaraa Ai os."
 

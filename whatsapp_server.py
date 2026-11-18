@@ -6,8 +6,7 @@ from safe_guard import safe_run
 app = Flask(__name__)
 SEEN = set()
 ADMIN_PHONE = os.environ.get("ADMIN_PHONE", "966575475336").strip()
-AHMED_PHONE = os.environ.get("AHMED_PHONE", "").strip()
-ALLOWED_GROUP = os.environ.get("ALLOWED_GROUP", "").strip()
+ALLOWED_GROUP = os.environ.get("ALLOWED_GROUP", "120363413772983962@g.us").strip()
 
 @app.route("/", methods=["GET", "POST"])
 @app.route("/whatsapp-webhook", methods=["GET", "POST"])
@@ -16,18 +15,16 @@ def webhook():
     d = request.get_json(silent=True) or {}
     wt = d.get("typeWebhook", "")
     sd, md = d.get("senderData", {}), d.get("messageData", {})
-    cid, sender, sname = sd.get("chatId", ""), sd.get("sender", ""), sd.get("senderName", "User")
+    cid, sender, sname = sd.get("chatId", "").strip(), sd.get("sender", ""), sd.get("senderName", "User")
     msg = (md.get("textMessageData", {}).get("textMessage", "") or md.get("extendedTextMessageData", {}).get("text", "")).strip()
     if not cid or not msg or msg.startswith(("🤖", "⏳", "🧬", "📊", "📄", "📽️", "⚠️")): return jsonify({"status": "ignore"}), 200
     mid = d.get("idMessage", "")
     if mid and mid in SEEN: return jsonify({"status": "dup"}), 200
     if mid: SEEN.add(mid)
     is_out = "outgoing" in wt
-    who = sender or (ADMIN_PHONE if is_out else cid)
-    is_admin = is_out or (ADMIN_PHONE in who)
-    is_ahmed = bool(AHMED_PHONE and AHMED_PHONE in who)
+    is_admin = is_out or (ADMIN_PHONE in (sender or cid))
     is_self = ("@c.us" in cid and ADMIN_PHONE in cid)
-    is_grp = bool(ALLOWED_GROUP and cid == ALLOWED_GROUP and (is_admin or is_ahmed))
+    is_grp = (cid == ALLOWED_GROUP)
     if not (is_self or is_grp): return jsonify({"status": "blocked"}), 200
     role = "admin" if is_admin else "co_lead"
     threading.Thread(target=safe_run, args=(run_task, cid, msg, role, sname)).start()

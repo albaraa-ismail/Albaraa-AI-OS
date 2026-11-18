@@ -7,3 +7,11 @@ python-docx
 duckduckgo-search
 pypdf
 beautifulsoup4
+pypdf
+beautifulsoup4
+edge-tts
+moviepy==1.0.3
+Pillow
+arabic-reshaper
+python-bidi
+numpy

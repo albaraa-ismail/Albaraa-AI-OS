@@ -8,6 +8,7 @@ from core_ai import sb, ai_ask, send_msg, send_file
 app = Flask(__name__)
 SEEN = set()
 ADMIN_PHONE = os.environ.get("ADMIN_PHONE", "966575475336").strip()
+AHMED_PHONE = os.environ.get("AHMED_PHONE", "").strip()
 
 def run_task(cid, msg, role, sname):
     t0, low, dtype = time.time(), msg.lower(), "استشارة"
@@ -53,23 +54,24 @@ def run_task(cid, msg, role, sname):
         ans = ai_ask(f"{msg}\nبحث:\n{web}", f"أنت منظومة Albaraa Ai os. الوكلاء:\n{ag}\nأجب باحترافية بالعربية.")
         sb("POST", "self_learning_logs", {"user_role": role, "task_type": "هندسي", "lesson_learned": f"{sname}: {msg[:40]}"})
         send_msg(cid, f"🤖 *Albaraa Ai os*\n━━━━━━━━━━\n{ans}\n━━━━━━━━━━\n🌐 نشط ✅")
-    sb("POST", "telemetry_kpis", {"user_id": cid, "user_role": role, "unit_used": "Admin", "task_complexity": "متقدم", "response_time_sec": round(time.time() - t0, 2), "time_saved_min": 45, "user_growth_score": 90, "deliverable_type": dtype})
+    sb("POST", "telemetry_kpis", {"user_id": cid, "user_role": role, "unit_used": "Co-Lead" if role == "co_lead" else "Admin", "task_complexity": "متقدم", "response_time_sec": round(time.time() - t0, 2), "time_saved_min": 45, "user_growth_score": 90, "deliverable_type": dtype})
 
 @app.route("/", methods=["GET", "POST"])
 @app.route("/whatsapp-webhook", methods=["GET", "POST"])
 def webhook():
     if request.method == "GET": return jsonify({"status": "online"}), 200
     d = request.get_json(silent=True) or {}
-    if d.get("typeWebhook") != "incomingMessageReceived": return jsonify({"status": "skip"}), 200
+    if d.get("typeWebhook") not in ("incomingMessageReceived", "outgoingMessageReceived"): return jsonify({"status": "skip"}), 200
     mid = d.get("idMessage", "")
     if not mid or mid in SEEN: return jsonify({"status": "dup"}), 200
     SEEN.add(mid)
     sd, md = d.get("senderData", {}), d.get("messageData", {})
-    cid, sname = sd.get("chatId", ""), sd.get("senderName", "User")
-    msg = md.get("textMessageData", {}).get("textMessage", "") or md.get("extendedTextMessageData", {}).get("text", "")
-    if cid and msg:
-        role = "admin" if ADMIN_PHONE in cid else "user"
-        threading.Thread(target=run_task, args=(cid, msg.strip(), role, sname)).start()
+    cid, sender, sname = sd.get("chatId", ""), sd.get("sender", ""), sd.get("senderName", "User")
+    msg = (md.get("textMessageData", {}).get("textMessage", "") or md.get("extendedTextMessageData", {}).get("text", "")).strip()
+    if not cid or not msg or msg.startswith(("🤖", "⏳", "🧬", "📊", "📄", "📽️")): return jsonify({"status": "ignore"}), 200
+    who = sender or cid
+    role = "admin" if ADMIN_PHONE in who else ("co_lead" if AHMED_PHONE and AHMED_PHONE in who else "user")
+    threading.Thread(target=run_task, args=(cid, msg, role, sname)).start()
     return jsonify({"status": "ok"}), 200
 
 if __name__ == "__main__":

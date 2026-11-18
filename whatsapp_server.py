@@ -15,15 +15,15 @@ def webhook():
     if request.method == "GET": return jsonify({"status": "online"}), 200
     d = request.get_json(silent=True) or {}
     wt = d.get("typeWebhook", "")
-    if wt not in ("incomingMessageReceived", "outgoingMessageReceived", "outgoingAPIMessageReceived"): return jsonify({"status": "skip"}), 200
-    mid = d.get("idMessage", "")
-    if not mid or mid in SEEN: return jsonify({"status": "dup"}), 200
-    SEEN.add(mid)
     sd, md = d.get("senderData", {}), d.get("messageData", {})
     cid, sender, sname = sd.get("chatId", ""), sd.get("sender", ""), sd.get("senderName", "User")
     msg = (md.get("textMessageData", {}).get("textMessage", "") or md.get("extendedTextMessageData", {}).get("text", "")).strip()
+    print(f"HOOK: {wt} | CID: {cid} | MSG: {msg[:20]}")
     if not cid or not msg or msg.startswith(("🤖", "⏳", "🧬", "📊", "📄", "📽️", "⚠️")): return jsonify({"status": "ignore"}), 200
-    is_out = wt in ("outgoingMessageReceived", "outgoingAPIMessageReceived")
+    mid = d.get("idMessage", "")
+    if mid and mid in SEEN: return jsonify({"status": "dup"}), 200
+    if mid: SEEN.add(mid)
+    is_out = "outgoing" in wt
     who = sender or (ADMIN_PHONE if is_out else cid)
     is_admin = is_out or (ADMIN_PHONE in who)
     is_ahmed = bool(AHMED_PHONE and AHMED_PHONE in who)

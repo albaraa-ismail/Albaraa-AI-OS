@@ -5,18 +5,13 @@ from collections import OrderedDict
 from flask import Flask, request, jsonify
 from agent_brain import run_task
 from safe_guard import safe_run
+from media_vision import download_whatsapp_file, MEDIA_VAULT
 
-# إعداد نظام سجلات (Logs) احترافي وواضح في Render
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("WhatsAppWebhook")
 
 app = Flask(__name__)
 
-# ذاكرة مؤقتة ذكية للرسائل المعالجة (تحتفظ بآخر 2000 رسالة فقط لمنع استهلاك الرام)
 class BoundedCache:
     def __init__(self, max_size=2000):
         self.cache = OrderedDict()
@@ -35,27 +30,35 @@ class BoundedCache:
             return False
 
 SEEN_MESSAGES = BoundedCache(max_size=2000)
-
-# تحميل الإعدادات وتنظيفها من أي مسافات أو رموز زائدة
 ADMIN_PHONE = "".join(filter(str.isdigit, os.environ.get("ADMIN_PHONE", "966575475336")))
-ALLOWED_GROUPS = {
-    g.strip() for g in os.environ.get("ALLOWED_GROUP", "120363413772983962@g.us").split(",") if g.strip()
-}
+ALLOWED_GROUPS = {g.strip() for g in os.environ.get("ALLOWED_GROUP", "120363413772983962@g.us").split(",") if g.strip()}
+BOT_PREFIXES = ("🤖", "⏳", "🧬", "📊", "📄", "📽️", "💻", "⚠️", "✅", "❌")
 
-# الإيموجيات الخاصة بردود الوكيل لمنع دخوله في حلقة ردود لا نهائية
-BOT_PREFIXES = ("🤖", "⏳", "🧬", "📊", "📄", "📽️", "⚠️", "✅", "❌")
-
-def extract_text(message_data: dict) -> str:
-    """استخراج النص من مختلف أنواع رسائل واتساب (عادية، رد على رسالة، أو مع رابط)"""
+def parse_incoming_message(message_data: dict):
+    """استخراج النص أو الملف/الصورة/الفيديو/الصوت من رسالة واتساب"""
     if not message_data:
-        return ""
-    msg = (
+        return "", None
+
+    type_msg = message_data.get("typeMessage", "")
+    text = (
         message_data.get("textMessageData", {}).get("textMessage")
         or message_data.get("extendedTextMessageData", {}).get("text")
-        or message_data.get("quotedMessage", {}).get("textMessage")
         or ""
-    )
-    return msg.strip()
+    ).strip()
+
+    media_info = None
+    if type_msg in ("documentMessage", "imageMessage", "videoMessage", "audioMessage"):
+        file_data = message_data.get("fileMessageData", {})
+        dl_url = file_data.get("downloadUrl", "")
+        fname = file_data.get("fileName") or f"media_{type_msg}"
+        mime = file_data.get("mimeType", "application/octet-stream")
+        caption = file_data.get("caption", "").strip()
+        if caption:
+            text = caption
+        if dl_url:
+            media_info = {"url": dl_url, "filename": fname, "mime": mime, "type": type_msg}
+
+    return text, media_info
 
 @app.route("/", methods=["GET", "POST"])
 @app.route("/whatsapp-webhook", methods=["GET", "POST"])
@@ -66,11 +69,9 @@ def webhook():
     payload = request.get_json(silent=True) or {}
     webhook_type = payload.get("typeWebhook", "")
 
-    # 1. قبول الرسائل الواردة، والرسائل الصادرة من جوالك يدوياً فقط (تجاهل outgoingAPIMessageReceived)
     if webhook_type not in ("incomingMessageReceived", "outgoingMessageReceived"):
-        return jsonify({"status": "ignored_type", "type": webhook_type}), 200
+        return jsonify({"status": "ignored_type"}), 200
 
-    # 2. منع التكرار
     msg_id = payload.get("idMessage", "")
     if SEEN_MESSAGES.is_duplicate(msg_id):
         return jsonify({"status": "duplicate"}), 200
@@ -82,49 +83,43 @@ def webhook():
     chat_id = sender_data.get("chatId", "").strip()
     sender = sender_data.get("sender", "").strip()
     sender_name = sender_data.get("senderName", "User").strip() or "User"
-    bot_wid = instance_data.get("wid", "").strip() # المعرّف الفعلي لحساب الوكيل
+    bot_wid = instance_data.get("wid", "").strip()
 
-    msg_text = extract_text(message_data)
+    msg_text, media_info = parse_incoming_message(message_data)
 
-    # 3. تجاهل الرسائل الفارغة أو التي تبدأ ببصمة الوكيل
-    if not chat_id or not msg_text or msg_text.startswith(BOT_PREFIXES):
+    if not chat_id or (not msg_text and not media_info) or msg_text.startswith(BOT_PREFIXES):
         return jsonify({"status": "ignored_content"}), 200
 
     is_outgoing = (webhook_type == "outgoingMessageReceived")
     is_group = chat_id.endswith("@g.us")
 
-    # 4. التحقق الذكي من المحادثة الخاصة (يدعم صيغة @c.us وصيغة @lid الجديدة)
     is_self_chat = False
     if not is_group:
-        # إذا كنت تراسل نفسك (صادرة إلى رقمك أو معرّف البوت أو بصيغة @lid خاصة بك)
         if is_outgoing and (ADMIN_PHONE in chat_id or chat_id == bot_wid or chat_id.endswith("@lid")):
             is_self_chat = True
-        # إذا أرسلت للوكيل من رقمك الخاص إلى رقم وكيل مستقل
         elif not is_outgoing and (ADMIN_PHONE in sender or ADMIN_PHONE in chat_id):
             is_self_chat = True
 
     is_allowed_group = is_group and (chat_id in ALLOWED_GROUPS)
-
-    # 5. رفض أي محادثة غير مصرح بها مع تسجيل السبب في Logs
     if not (is_self_chat or is_allowed_group):
-        logger.info(f"Blocked message | type={webhook_type} | chatId={chat_id} | sender={sender}")
         return jsonify({"status": "blocked"}), 200
 
-    # 6. تحديد الصلاحية (Admin لك، و co_lead لبقية أعضاء القروب)
-    is_admin = is_outgoing or (ADMIN_PHONE in sender) or (ADMIN_PHONE in chat_id)
-    role = "admin" if is_admin else "co_lead"
+    role = "admin" if (is_outgoing or ADMIN_PHONE in sender or ADMIN_PHONE in chat_id) else "co_lead"
 
-    logger.info(f"Accepted | role={role} | chat={chat_id} | user={sender_name} | msg={msg_text[:40]}")
+    def process_pipeline():
+        if media_info:
+            local_path = download_whatsapp_file(media_info["url"], media_info["filename"])
+            if local_path:
+                MEDIA_VAULT[chat_id] = {
+                    "path": local_path,
+                    "filename": media_info["filename"],
+                    "mime": media_info["mime"],
+                    "type": media_info["type"]
+                }
+        safe_run(run_task, chat_id, msg_text, role, sender_name)
 
-    # 7. تنفيذ المهمة في الخلفية بأمان
-    threading.Thread(
-        target=safe_run,
-        args=(run_task, chat_id, msg_text, role, sender_name),
-        daemon=True
-    ).start()
-
+    threading.Thread(target=process_pipeline, daemon=True).start()
     return jsonify({"status": "ok"}), 200
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))

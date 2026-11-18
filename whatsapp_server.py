@@ -26,14 +26,16 @@ def webhook():
     f_data = md.get("fileMessageData") or md.get("audioMessageData") or md.get("imageMessageData") or md.get("documentMessageData") or {}
     msg = (md.get("textMessageData", {}).get("textMessage", "") or md.get("extendedTextMessageData", {}).get("text", "") or f_data.get("caption", "")).strip()
     m_url, m_mime = f_data.get("downloadUrl", ""), f_data.get("mimeType", "audio/ogg")
-    print(f"IN: {wt} | URL: {bool(m_url)} | MSG: {msg[:15]}")
+    print(f"IN: {wt} | CID: {cid} | URL: {bool(m_url)} | MSG: {msg[:15]}")
     if not cid or (not msg and not m_url) or msg.startswith(("🤖", "⏳", "🧬", "📊", "📄", "📽️", "⚠️", "🔐", "✅", "🚀", "📈", "🛠️", "🔔", "⏰", "💾", "📋", "🗑️")): return jsonify({"status": "ignore"}), 200
     mid = d.get("idMessage", "")
     if mid and mid in SEEN: return jsonify({"status": "dup"}), 200
     if mid: SEEN.add(mid)
     is_out = "outgoing" in wt
     is_admin = is_out or (ADMIN_PHONE in (sender or cid))
-    if not (("@c.us" in cid and ADMIN_PHONE in cid) or (cid == ALLOWED_GROUP)): return jsonify({"status": "blocked"}), 200
+    if not (("@c.us" in cid and ADMIN_PHONE in cid) or (cid == ALLOWED_GROUP)):
+        print(f"BLOCKED: {cid} != {ALLOWED_GROUP}")
+        return jsonify({"status": "blocked"}), 200
     role = "admin" if is_admin else "co_lead"
     threading.Thread(target=process_incoming, args=(cid, msg, m_url, m_mime, role, sname)).start()
     return jsonify({"status": "ok"}), 200

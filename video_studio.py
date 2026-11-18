@@ -109,24 +109,24 @@ def _compose_cinematic_frame(img_path: str, ar_caption: str, brand: str = "Albar
     draw.text((55, 33), brand, font=font_brand, fill=(251, 191, 36, 255))
 
     shaped = _shape_ar(ar_caption[:85])
-    bbox = draw.textbbox((0, 0), shaped, font=font_main)
-    text_w = bbox - bbox
+    x1, y1, x2, y2 = draw.textbbox((0, 0), shaped, font=font_main)
+    text_w = x2 - x1
     x_pos = max(40, (1280 - text_w) // 2)
     draw.text((x_pos, 585), shaped, font=font_main, fill=(255, 255, 255, 255))
 
     final_img = Image.alpha_composite(base, overlay).convert("RGB")
     final_img.save(img_path, quality=92)
 
-def _zoom_effect(clip, zoom_ratio=0.06):
+def _zoom_effect(clip, zoom_ratio=0.05):
     def effect(get_frame, t):
         img = Image.fromarray(get_frame(t))
-        base_size = img.size
+        bw, bh = img.size
         scale = 1 + (zoom_ratio * (t / max(clip.duration, 0.1)))
-        new_size = (int(base_size * scale), int(base_size * scale))
-        img = img.resize(new_size, Image.Resampling.LANCZOS)
-        left = (new_size - base_size) // 2
-        top = (new_size - base_size) // 2
-        img = img.crop((left, top, left + base_size, top + base_size))
+        nw, nh = int(bw * scale), int(bh * scale)
+        img = img.resize((nw, nh), Image.Resampling.LANCZOS)
+        left = (nw - bw) // 2
+        top = (nh - bh) // 2
+        img = img.crop((left, top, left + bw, top + bh))
         return np.array(img)
     return clip.fl(effect)
 

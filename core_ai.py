@@ -29,7 +29,7 @@ def ai_ask(p, s):
         except Exception as e: print("Groq Ex:", e)
     if GEM_KEY:
         try:
-            u = "".join(["https:/", "/generativelanguage.googleapis.", "com/v1beta/models/gemini-2.5-flash:generateContent?key=", GEM_KEY])
+            u = "".join(["https:/", "/generativelanguage.googleapis.", "com/v1beta/models/gemini-3.8-flash:generateContent?key=", GEM_KEY])
             r = requests.post(u, json={"contents": [{"parts": [{"text": f"{s}\n{p}"}]}]}, timeout=25)
             if r.status_code == 200: return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
             print("Gem Err:", r.text)

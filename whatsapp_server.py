@@ -9,6 +9,7 @@ app = Flask(__name__)
 SEEN = set()
 ADMIN_PHONE = os.environ.get("ADMIN_PHONE", "966575475336").strip()
 AHMED_PHONE = os.environ.get("AHMED_PHONE", "").strip()
+ALLOWED_GROUP = os.environ.get("ALLOWED_GROUP", "").strip()
 
 def run_task(cid, msg, role, sname):
     t0, low, dtype = time.time(), msg.lower(), "استشارة"
@@ -39,11 +40,11 @@ def run_task(cid, msg, role, sname):
     elif any(k in low for k in ("عرض", "بوربوينت", "شرائح")):
         send_msg(cid, "⏳ جاري تصميم العرض...")
         raw = ai_ask(msg, "صمم 5 شرائح، عنوان كل شريحة بسطر وتحته 3 نقاط، وافصل بسطر فارغ:")
-        prs = Presentation(); s0 = prs.slides.add_slide(prs.slide_layouts); s0.shapes.title.text = "Albaraa Ai os"; s0.placeholders.text = msg[:60]
+        prs = Presentation(); s0 = prs.slides.add_slide(prs.slide_layouts[0]); s0.shapes.title.text = "Albaraa Ai os"; s0.placeholders[1].text = msg[:60]
         for blk in [x.strip() for x in raw.split("\n\n") if x.strip()]:
             lns = [l.strip().replace("**", "") for l in blk.split("\n") if l.strip()]
             if lns:
-                sl = prs.slides.add_slide(prs.slide_layouts); sl.shapes.title.text = lns[:60]; sl.placeholders.text = "\n".join(lns[1:])
+                sl = prs.slides.add_slide(prs.slide_layouts[1]); sl.shapes.title.text = lns[0][:60]; sl.placeholders[1].text = "\n".join(lns[1:])
         prs.save("/tmp/Out.pptx"); send_file(cid, "/tmp/Out.pptx", "Slides.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "📽️ عرض تقديمي جاهز"); dtype = "PowerPoint"
     else:
         web = ""
@@ -61,7 +62,8 @@ def run_task(cid, msg, role, sname):
 def webhook():
     if request.method == "GET": return jsonify({"status": "online"}), 200
     d = request.get_json(silent=True) or {}
-    if d.get("typeWebhook") not in ("incomingMessageReceived", "outgoingMessageReceived"): return jsonify({"status": "skip"}), 200
+    wt = d.get("typeWebhook", "")
+    if wt not in ("incomingMessageReceived", "outgoingMessageReceived", "outgoingAPIMessageReceived"): return jsonify({"status": "skip"}), 200
     mid = d.get("idMessage", "")
     if not mid or mid in SEEN: return jsonify({"status": "dup"}), 200
     SEEN.add(mid)
@@ -69,8 +71,14 @@ def webhook():
     cid, sender, sname = sd.get("chatId", ""), sd.get("sender", ""), sd.get("senderName", "User")
     msg = (md.get("textMessageData", {}).get("textMessage", "") or md.get("extendedTextMessageData", {}).get("text", "")).strip()
     if not cid or not msg or msg.startswith(("🤖", "⏳", "🧬", "📊", "📄", "📽️")): return jsonify({"status": "ignore"}), 200
+    if "@g.us" in cid: print("Group ID:", cid)
     who = sender or cid
-    role = "admin" if ADMIN_PHONE in who else ("co_lead" if AHMED_PHONE and AHMED_PHONE in who else "user")
+    is_admin = ADMIN_PHONE in who
+    is_ahmed = bool(AHMED_PHONE and AHMED_PHONE in who)
+    is_self_chat = ("@c.us" in cid and ADMIN_PHONE in cid)
+    is_target_group = bool(ALLOWED_GROUP and cid == ALLOWED_GROUP and (is_admin or is_ahmed))
+    if not (is_self_chat or is_target_group): return jsonify({"status": "blocked"}), 200
+    role = "admin" if is_admin else "co_lead"
     threading.Thread(target=run_task, args=(cid, msg, role, sname)).start()
     return jsonify({"status": "ok"}), 200
 

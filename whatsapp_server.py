@@ -31,11 +31,13 @@ class BoundedCache:
 
 SEEN_MESSAGES = BoundedCache(max_size=2000)
 ADMIN_PHONE = "".join(filter(str.isdigit, os.environ.get("ADMIN_PHONE", "966575475336")))
-ALLOWED_GROUPS = {g.strip() for g in os.environ.get("ALLOWED_GROUP", "120363413772983962@g.us").split(",") if g.strip()}
-BOT_PREFIXES = ("🤖", "⏳", "🧬", "📊", "📄", "📽️", "💻", "⚠️", "✅", "❌")
+ALLOWED_GROUPS = {
+    g.strip() for g in os.environ.get("ALLOWED_GROUP", "120363413772983962@g.us").split(",") if g.strip()
+}
+BOT_PREFIXES = ("🤖", "⏳", "🧬", "📊", "📄", "📽️", "💻", "⚠️", "✅", "❌", "📥", "👁️")
 
 def parse_incoming_message(message_data: dict):
-    """استخراج النص أو الملف/الصورة/الفيديو/الصوت من رسالة واتساب"""
+    """استخراج النص والوسائط والملفات (بما فيها الرسائل المُعاد توجيهها)"""
     if not message_data:
         return "", None
 
@@ -47,19 +49,17 @@ def parse_incoming_message(message_data: dict):
     ).strip()
 
     media_info = None
-    if type_msg in ("documentMessage", "imageMessage", "videoMessage", "audioMessage"):
-        file_data = message_data.get("fileMessageData", {})
+    file_data = message_data.get("fileMessageData") or {}
+    if file_data.get("downloadUrl"):
         dl_url = file_data.get("downloadUrl", "")
         fname = file_data.get("fileName") or f"media_{type_msg}"
         mime = file_data.get("mimeType", "application/octet-stream")
-        caption = file_data.get("caption", "").strip()
+        caption = (file_data.get("caption") or "").strip()
         if caption:
             text = caption
-        if dl_url:
-            media_info = {"url": dl_url, "filename": fname, "mime": mime, "type": type_msg}
+        media_info = {"url": dl_url, "filename": fname, "mime": mime, "type": type_msg}
 
     return text, media_info
-
 @app.route("/", methods=["GET", "POST"])
 @app.route("/whatsapp-webhook", methods=["GET", "POST"])
 def webhook():
@@ -108,6 +108,7 @@ def webhook():
 
     def process_pipeline():
         if media_info:
+            logger.info(f"Downloading media: {media_info['filename']} ({media_info['type']})")
             local_path = download_whatsapp_file(media_info["url"], media_info["filename"])
             if local_path:
                 MEDIA_VAULT[chat_id] = {

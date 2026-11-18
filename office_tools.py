@@ -1,42 +1,106 @@
-import openpyxl
-from pptx import Presentation
+import os, openpyxl, pendulum
+from hijridate import Gregorian
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.chart import BarChart, Reference
 from docx import Document
+from docx.shared import Pt as DocPt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
 from core_ai import sb, ai_ask, send_msg, send_file
+
+def today_dates():
+    now = pendulum.now("Asia/Riyadh")
+    hijri = Gregorian(now.year, now.month, now.day).to_hijri()
+    return f"{hijri.day}/{hijri.month}/{hijri.year}هـ - {now.format('YYYY/MM/DD')}م"
+
+def _set_rtl(p):
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    pPr = p._p.get_or_add_pPr()
+    pPr.append(OxmlElement('w:bidi'))
 
 def make_kpi(cid):
     wb = openpyxl.Workbook(); ws = wb.active; ws.sheet_view.rightToLeft = True
     ws.append(["رقم العملية", "المستخدم", "القسم", "زمن التنفيذ(ث)", "الوقت الموفر(د)", "مؤشر التطور%", "المخرج"])
     for i in sb("GET", "telemetry_kpis", q="?order=id.desc&limit=50"):
         ws.append([i.get("id"), i.get("user_role"), i.get("unit_used"), i.get("response_time_sec"), i.get("time_saved_min"), i.get("user_growth_score"), i.get("deliverable_type")])
-    wb.save("/tmp/KPI.xlsx")
-    send_file(cid, "/tmp/KPI.xlsx", "Performance_Report.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "📊 تقرير قياس الأداء وتطور الإنجاز")
+    path = "/tmp/KPI.xlsx"
+    wb.save(path)
+    send_file(cid, path, "Performance_Report.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"📊 تقرير قياس الأداء ({today_dates()})")
+    if os.path.exists(path): os.remove(path)
 
 def make_word(cid, msg):
-    send_msg(cid, "⏳ جاري إعداد المستند الاحترافي بدقة عالية...")
-    raw = ai_ask(msg, "اكتب مستنداً أكاديمياً وتنفيذياً متكاملاً وعالي الدقة باللغة العربية الفصحى، مقسماً إلى عناوين رئيسية وفقرات تفصيلية عميقة وشاملة:")
-    doc = Document(); doc.add_heading(msg[:50], 0)
-    for l in raw.split("\n"):
-        cl = l.strip().replace("**", "")
-        if cl: doc.add_heading(cl.lstrip("# "), level=1) if cl.startswith(("#", "أولاً", "ثانياً", "ثالثاً", "1.", "2.", "3.", "الفصل")) else doc.add_paragraph(cl)
-    doc.save("/tmp/Doc.docx")
-    send_file(cid, "/tmp/Doc.docx", "Document.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "📄 المستند جاهز")
+    send_msg(cid, "⏳ جاري إعداد مستند Word متكامل ومراجع بدقة احترافية...")
+    outline = ai_ask(msg, "ضع خطة هيكلية احترافية من 5 محاور رئيسية لتغطية هذا الموضوع بعمق أكاديمي وتنفيذي. اكتب كل محور في سطر مستقل بدون مقدمات:")
+    sections = [s.strip().lstrip("-*#1234567890. ") for s in outline.split("\n") if len(s.strip()) > 3][:5]
+    if not sections:
+        sections = ["المقدمة والإطار العام", "التحليل والمنهجية", "التطبيقات العملية", "مؤشرات الأداء والقياس", "النتائج والتوصيات"]
+
+    doc = Document()
+    doc.styles['Normal'].font.name = 'Arial'
+    doc.styles['Normal'].font.size = DocPt(14)
+
+    title_p = doc.add_heading(msg[:70], 0); _set_rtl(title_p)
+    date_p = doc.add_paragraph(f"تاريخ الإصدار: {today_dates()}"); _set_rtl(date_p)
+
+    for sec in sections:
+        h = doc.add_heading(sec, level=1); _set_rtl(h)
+        draft = ai_ask(f"الموضوع: {msg}\nالمحور المطلوب: {sec}", "اكتب محتوى علمياً وتنفيذياً غزيراً ومفصلاً باللغة العربية الفصحى مقسماً إلى فقرات وعناوين فرعية:")
+        refined = ai_ask(draft, "قم بتدقيق وتحسين هذا النص لغوياً وأكاديمياً ليصبح بأعلى درجات الرصانة والوضوح دون حذف التفاصيل:")
+        for l in refined.split("\n"):
+            cl = l.strip().replace("**", "")
+            if not cl: continue
+            if cl.startswith(("#", "أولاً", "ثانياً", "ثالثاً", "رابعاً", "خامساً")):
+                sh = doc.add_heading(cl.lstrip("# "), level=2); _set_rtl(sh)
+            else:
+                p = doc.add_paragraph(cl); _set_rtl(p)
+
+    path = "/tmp/Doc.docx"
+    doc.save(path)
+    send_file(cid, path, "Executive_Document.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "📄 تم إعداد المستند بنجاح")
+    if os.path.exists(path): os.remove(path)
 
 def make_excel(cid, msg):
-    send_msg(cid, "⏳ جاري بناء الجدول...")
-    raw = ai_ask(msg, "اكتب بيانات جدول منظم ودقيق، كل سطر صف وتفصل الأعمدة بعلامة | فقط بدون أي نص إضافي:")
+    send_msg(cid, "⏳ جاري بناء وتحليل ملف Excel وتوليد الرسوم البيانية...")
+    raw = ai_ask(msg, "أنشئ جدول بيانات احترافي من 12 صفاً و 5 أعمدة (اجعل العمود الأول نصي والعمود الثاني رقمي ليصلح للرسم البياني). افصل بين الأعمدة بعلامة | فقط بدون أي نص إضافي أو خطوط فصل:")
     wb = openpyxl.Workbook(); ws = wb.active; ws.sheet_view.rightToLeft = True
-    for l in raw.split("\n"):
-        if "|" in l: ws.append([x.strip() for x in l.split("|") if x.strip()])
-    wb.save("/tmp/Out.xlsx")
-    send_file(cid, "/tmp/Out.xlsx", "Table_Data.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "📊 ملف البيانات جاهز")
+    ws.title = "التحليل والبيانات"
+    h_fill = PatternFill(start_color="1B365D", end_color="1B365D", fill_type="solid")
+    z_fill = PatternFill(start_color="F4F7FA", end_color="F4F7FA", fill_type="solid")
+    h_font = Font(color="FFFFFF", bold=True, size=12)
+    border = Border(left=Side(style='thin', color='D9D9D9'), right=Side(style='thin', color='D9D9D9'), top=Side(style='thin', color='D9D9D9'), bottom=Side(style='thin', color='D9D9D9'))
 
-def make_ppt(cid, msg):
-    send_msg(cid, "⏳ جاري تصميم العرض التقديمي الاحترافي...")
-    raw = ai_ask(msg, "صمم 7 شرائح عرض تقديمي احترافية وعالية الدقة، عنوان كل شريحة بسطر وتحته 4 نقاط مركزة وعميقة، وافصل بين كل شريحة بسطر فارغ:")
-    prs = Presentation(); s0 = prs.slides.add_slide(prs.slide_layouts); s0.shapes.title.text = msg[:45]; s0.placeholders.text = "عرض تنفيذي وأكاديمي متكامل"
-    for blk in [x.strip() for x in raw.split("\n\n") if x.strip()]:
-        lns = [l.strip().replace("**", "") for l in blk.split("\n") if l.strip()]
-        if lns:
-            sl = prs.slides.add_slide(prs.slide_layouts); sl.shapes.title.text = lns[:60]; sl.placeholders.text = "\n".join(lns[1:])
-    prs.save("/tmp/Out.pptx")
-    send_file(cid, "/tmp/Out.pptx", "Presentation.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "📽️ العرض التقديمي جاهز")
+    row_idx = 0
+    for l in raw.split("\n"):
+        if "|" in l and not set(l.replace("|", "").strip()).issubset({"-", ":", " "}):
+            cells = []
+            for x in l.split("|"):
+                val = x.strip().replace("**", "")
+                if val:
+                    try: val = float(val) if "." in val else int(val)
+                    except ValueError: pass
+                    cells.append(val)
+            if cells:
+                row_idx += 1; ws.append(cells)
+                for col_idx in range(1, len(cells) + 1):
+                    cell = ws.cell(row=row_idx, column=col_idx)
+                    cell.alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
+                    cell.border = border
+                    if row_idx == 1: cell.fill = h_fill; cell.font = h_font
+                    elif row_idx % 2 == 0: cell.fill = z_fill
+
+    for col in ws.columns:
+        max_len = max((len(str(c.value or "")) for c in col), default=10)
+        ws.column_dimensions[col.column_letter].width = min(max_len + 6, 45)
+
+    if row_idx > 2 and ws.max_column >= 2:
+        try:
+            chart = BarChart(); chart.title = "التحليل البياني للمؤشرات"; chart.style = 11
+            chart.add_data(Reference(ws, min_col=2, min_row=1, max_row=row_idx), titles_from_data=True)
+            chart.set_categories(Reference(ws, min_col=1, min_row=2, max_row=row_idx))
+            ws.add_chart(chart, "G2")
+        except Exception: pass
+
+    path = "/tmp/Out.xlsx"
+    wb.save(path)
+    send_file(cid, path, "Analytics_Report.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "📊 ملف Excel جاهز ومزود برسم بياني")
+    if os.path.exists(path): os.remove(path)

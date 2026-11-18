@@ -18,7 +18,6 @@ def webhook():
     sd, md = d.get("senderData", {}), d.get("messageData", {})
     cid, sender, sname = sd.get("chatId", ""), sd.get("sender", ""), sd.get("senderName", "User")
     msg = (md.get("textMessageData", {}).get("textMessage", "") or md.get("extendedTextMessageData", {}).get("text", "")).strip()
-    print(f"HOOK: {wt} | CID: {cid} | MSG: {msg[:20]}")
     if not cid or not msg or msg.startswith(("🤖", "⏳", "🧬", "📊", "📄", "📽️", "⚠️")): return jsonify({"status": "ignore"}), 200
     mid = d.get("idMessage", "")
     if mid and mid in SEEN: return jsonify({"status": "dup"}), 200

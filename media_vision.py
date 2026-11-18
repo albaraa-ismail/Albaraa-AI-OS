@@ -2,17 +2,19 @@ import os
 import re
 import base64
 import logging
-import requests
 import openpyxl
 from docx import Document
 from pypdf import PdfReader
 from bs4 import BeautifulSoup
-from core_ai import GEM_KEY, GROQ_KEY, GEMINI_BASE_URL, SESSION
+from core_ai import GEM_KEY, GEMINI_BASE_URL, SESSION
 
 logger = logging.getLogger("MediaVision")
 
 # خزينة لحفظ آخر ملف أو وسائط أرسلها المستخدم في كل محادثة
 MEDIA_VAULT = {}
+
+# بناء User-Agent برمجيًا لحمايته من متصفح الآيفون
+SAFE_UA = "".join(["Mozilla/5.0 ", "(iPhone; CPU iPhone OS 17_0 like Mac OS X)"])
 
 def download_whatsapp_file(url: str, filename: str) -> str:
     """تحميل الملفات أو الصور أو الفيديوهات من رابط Green-API"""
@@ -31,20 +33,21 @@ def download_whatsapp_file(url: str, filename: str) -> str:
 def scrape_url(url: str) -> str:
     """قراءة واستخراج محتوى أي رابط موقع إلكتروني"""
     try:
-        res = SESSION.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=12)
+        res = SESSION.get(url, headers={"User-Agent": SAFE_UA}, timeout=12)
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, "html.parser")
             for tag in soup(["script", "style", "nav", "footer"]):
                 tag.decompose()
-            text = "\n".join([line.strip() for line in soup.get_text().splitlines() if line.strip()])
-            return text[:12000]
+            lines = [line.strip() for line in soup.get_text().splitlines() if line.strip()]
+            return "\n".join(lines)[:12000]
     except Exception as e:
         logger.warning(f"Scrape error for {url}: {e}")
     return ""
 
 def extract_document_text(path: str) -> str:
     """قراءة محتوى أي ملف (Excel, Word, PDF, CSV, Code) بالكامل"""
-    ext = os.path.splitext(path).lower()
+    # التصحيح الجذري: إضافة [1] لاستخراج الامتداد النصي من الـ tuple
+    ext = os.path.splitext(path)[1].lower()
     try:
         if ext in (".xlsx", ".xlsm"):
             wb = openpyxl.load_workbook(path, data_only=True)
@@ -54,7 +57,8 @@ def extract_document_text(path: str) -> str:
                 out.append(f"--- ورقة: {sheet} (عدد الصفوف: {ws.max_row}) ---")
                 for r_idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
                     if any(row):
-                        out.append(f"صف {r_idx}: " + " | ".join([str(c if c is not None else "") for c in row]))
+                        row_vals = [str(c if c is not None else "") for c in row]
+                        out.append(f"صف {r_idx}: " + " | ".join(row_vals))
             return "\n".join(out)[:15000]
 
         elif ext == ".docx":
@@ -111,7 +115,7 @@ def analyze_multimodal_file(path: str, mime_type: str, user_prompt: str) -> str:
             }
             res = SESSION.post(url, json=payload, timeout=45)
             if res.status_code == 200:
-                return res.json()["candidates"]["content"]["parts"]["text"].strip()
+                return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
     except Exception as e:
         logger.error(f"Multimodal analysis error: {e}")
     return "⚠️ تعذر تحليل الوسائط حاليًا، تأكد من حجم الملف أو صيغته."

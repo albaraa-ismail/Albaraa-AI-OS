@@ -1,17 +1,62 @@
+# الخادم والاتصالات غير المتزامنة عالية الأداء
 flask
-requests
 gunicorn
-openpyxl
-python-pptx
-python-docx
+requests
+httpx
+aiohttp
+
+# أطر عمل الوكلاء المتعاونين والذكاء الاصطناعي (AI Agents)
+langgraph
+langchain-core
+pydantic
+pydantic-ai
+
+# البحث واستخراج البيانات من الويب واليوتيوب
 duckduckgo-search
-pypdf
 beautifulsoup4
+lxml
+trafilatura
+youtube-transcript-api
+
+# حزمة مايكروسوفت أوفيس وتحليل البيانات الضخمة
+python-docx
+openpyxl
+xlsxwriter
+pandas
+python-pptx
+
+# الرسوم البيانية المتقدمة والعروض البصرية
+plotly
+kaleido
+seaborn
+matplotlib
+qrcode
+
+# القياسات والحسابات العلمية والزمنية والهجري
+numpy
+scipy
+statsmodels
+scikit-learn
+sympy
+pendulum
+python-dateutil
+hijridate
+
+# قراءة وإنشاء ملفات PDF الاحترافية
 pypdf
-beautifulsoup4
+pdfplumber
+reportlab
+fpdf2
+
+# الصوت البشري وإنتاج الفيديو المتكامل
 edge-tts
+gTTS
 moviepy==1.0.3
+imageio-ffmpeg
+pydub
+
+# معالجة الصور والخطوط العربية
 Pillow
+opencv-python-headless
 arabic-reshaper
 python-bidi
-numpy

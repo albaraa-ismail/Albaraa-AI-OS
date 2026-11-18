@@ -1,6 +1,7 @@
 import os, threading
 from flask import Flask, request, jsonify
 from agent_brain import run_task
+from safe_guard import safe_run
 
 app = Flask(__name__)
 SEEN = set()
@@ -21,7 +22,7 @@ def webhook():
     sd, md = d.get("senderData", {}), d.get("messageData", {})
     cid, sender, sname = sd.get("chatId", ""), sd.get("sender", ""), sd.get("senderName", "User")
     msg = (md.get("textMessageData", {}).get("textMessage", "") or md.get("extendedTextMessageData", {}).get("text", "")).strip()
-    if not cid or not msg or msg.startswith(("🤖", "⏳", "🧬", "📊", "📄", "📽️")): return jsonify({"status": "ignore"}), 200
+    if not cid or not msg or msg.startswith(("🤖", "⏳", "🧬", "📊", "📄", "📽️", "⚠️")): return jsonify({"status": "ignore"}), 200
     is_out = wt in ("outgoingMessageReceived", "outgoingAPIMessageReceived")
     who = sender or (ADMIN_PHONE if is_out else cid)
     is_admin = is_out or (ADMIN_PHONE in who)
@@ -30,7 +31,7 @@ def webhook():
     is_grp = bool(ALLOWED_GROUP and cid == ALLOWED_GROUP and (is_admin or is_ahmed))
     if not (is_self or is_grp): return jsonify({"status": "blocked"}), 200
     role = "admin" if is_admin else "co_lead"
-    threading.Thread(target=run_task, args=(cid, msg, role, sname)).start()
+    threading.Thread(target=safe_run, args=(run_task, cid, msg, role, sname)).start()
     return jsonify({"status": "ok"}), 200
 
 if __name__ == "__main__":

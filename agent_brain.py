@@ -7,14 +7,15 @@ from evolution_engine import propose_agent, approve_pending, manage_agents, add_
 
 def run_task(cid, msg, role, sname):
     t0, low, dtype = time.time(), msg.lower(), "مهمة ذكية"
-    if role == "admin" and low in ("موافق", "اعتماد", "اعتمد", "ثبت"): approve_pending(cid); return
+    if role == "admin" and any(k in low for k in ("موافق", "اعتماد", "اعتمد", "ثبت")): approve_pending(cid); return
     if role == "admin" and any(k in low for k in ("اعرض الوكلاء", "الوكلاء المعتمدين", "احذف وكيل", "حذف وكيل")): manage_agents(cid, msg); return
     if role == "admin" and any(k in low for k in ("نسخة احتياطية", "نسخه احتياطيه")): backup_memory(cid); return
     if role == "admin" and any(k in low for k in ("تقرير دوري", "قياس الأداء", "تحليل السلوك")): periodic_analytics(cid); return
     if role == "admin" and any(k in low for k in ("جدول القياس", "احصائيات اكسل")): make_kpi(cid); return
     if role == "admin" and any(k in low for k in ("طور نفسك", "ابحث عن الجديد", "ابتكار")): self_evolve_and_research(cid); return
     if any(k in low for k in ("ذكرني", "ذكرنا", "تذكير", "موعد")): add_reminder(cid, msg); return
-    if any(k in low for k in ("ابن وكيل", "انشئ وكيل", "أنشئ وكيل", "قسم جديد", "نحتاج وكيل")): propose_agent(cid, msg, sname); return
+    if any(w in low for w in ("وكيل", "قسم")) and any(v in low for v in ("ابن", "أبن", "ابني", "أبني", "أبنى", "انشئ", "أنشئ", "سوي", "اعمل", "نحتاج", "جديد")):
+        propose_agent(cid, msg, sname); return
     if any(k in low for k in ("وورد", "word", "تقرير رسمي", "خطاب")): make_word(cid, msg); dtype = "Word"
     elif any(k in low for k in ("اكسل", "إكسل", "excel", "جدول")): make_excel(cid, msg); dtype = "Excel"
     elif any(k in low for k in ("عرض", "بوربوينت", "شرائح")): make_ppt(cid, msg); dtype = "PowerPoint"

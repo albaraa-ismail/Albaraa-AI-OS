@@ -5,6 +5,7 @@ from duckduckgo_search import DDGS
 from core_ai import sb, ai_ask, send_msg
 from office_tools import make_kpi, make_word, make_excel, make_ppt, make_software, edit_uploaded_excel
 from media_vision import MEDIA_VAULT, extract_document_text, analyze_multimodal_file, scrape_url
+from video_studio import make_video
 from memory_engine import get_context, save_memory
 
 def clean_whatsapp_text(text: str) -> str:
@@ -17,7 +18,6 @@ def run_task(cid, msg, role, sname):
     t0, low, dtype = time.time(), msg.lower(), "استشارة"
     vault_item = MEDIA_VAULT.get(cid)
 
-    # 1. مصنع الوكلاء
     if role == "admin" and msg.startswith(("ابن وكيل", "انشئ وكيل", "أنشئ وكيل")):
         sb("POST", "agents_registry", {
             "unit_name": "تخصصية",
@@ -28,9 +28,7 @@ def run_task(cid, msg, role, sname):
         send_msg(cid, f"🧬 *مصنع الوكلاء:* تم تفعيل *{msg[:25]}* بنجاح!")
         return
 
-    # 2. إذا أرسل المستخدم صورة أو فيديو أو صوت (بدون نص أو مع نص)
     if vault_item and vault_item["type"] in ("imageMessage", "videoMessage", "audioMessage"):
-        # مسح العنصر بعد استخدامه حتى لا يتكرر في الرسائل النصية اللاحقة
         MEDIA_VAULT.pop(cid, None)
         send_msg(cid, "⏳ جاري تحليل الوسائط واستخراج كافة التفاصيل...")
         ans = analyze_multimodal_file(vault_item["path"], vault_item["mime"], msg)
@@ -38,20 +36,21 @@ def run_task(cid, msg, role, sname):
         send_msg(cid, f"👁️ *تحليل الوسائط الذكي*\n━━━━━━━━━━\n{ans}")
         return
 
-    # 3. إذا أرسل المستخدم ملفًا فقط بدون أي أمر نصي بعد، نخزنه ونؤكد الاستلام
     if vault_item and not msg:
         send_msg(cid, f"📥 تم استلام الملف *{vault_item['filename']}* بنجاح وحفظه في الذاكرة النشطة.\nأخبرني الآن بما تريد فعله به (تلخيص، تحليل، أو تعديل محدد).")
         return
 
-    # 4. إذا كان هناك ملف إكسل مرفوع وطلب المستخدم تعديله
     if vault_item and vault_item["path"].endswith((".xlsx", ".xlsm")) and any(k in low for k in ("عدل", "تعديل", "غير", "تغيير", "حدث", "استبدل", "اضف", "أضف")):
         edit_uploaded_excel(cid, vault_item["path"], vault_item["filename"], msg)
         dtype = "Excel_Edit"
 
-    # 5. أوامر إنشاء الملفات والبرامج والعروض
     elif role == "admin" and any(k in low for k in ("تقرير القياس", "جدول القياس", "احصائيات")):
         make_kpi(cid)
         dtype = "KPI"
+    elif any(k in low for k in ("فيديو", "مقطع", "video", "مونتاج", "فيلم")):
+        file_ctx = extract_document_text(vault_item["path"]) if vault_item else ""
+        make_video(cid, f"{msg}\n\nالمحتوى المرجعي:\n{file_ctx}" if file_ctx else msg)
+        dtype = "Video"
     elif any(k in low for k in ("وورد", "word", "تقرير رسمي", "خطاب", "مستند")):
         file_ctx = extract_document_text(vault_item["path"]) if vault_item else ""
         make_word(cid, f"{msg}\n\nالبيانات المرجعية من الملف المرفق:\n{file_ctx}" if file_ctx else msg)
@@ -69,7 +68,6 @@ def run_task(cid, msg, role, sname):
         make_software(cid, f"{msg}\n\nمواصفات من الملف المرفق:\n{file_ctx}" if file_ctx else msg)
         dtype = "Software"
 
-    # 6. التحليل الشامل (قراءة الملفات المرفوعة + الروابط + البحث المباشر)
     else:
         extra_context = []
         if vault_item:

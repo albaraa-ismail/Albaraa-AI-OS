@@ -23,9 +23,9 @@ def webhook():
     wt = d.get("typeWebhook", "")
     sd, md = d.get("senderData", {}), d.get("messageData", {})
     cid, sender, sname = sd.get("chatId", "").strip(), sd.get("sender", ""), sd.get("senderName", "User")
-    msg = (md.get("textMessageData", {}).get("textMessage", "") or md.get("extendedTextMessageData", {}).get("text", "") or md.get("fileMessageData", {}).get("caption", "")).strip()
-    f_data = md.get("fileMessageData", {})
-    m_url, m_mime = f_data.get("downloadUrl", ""), f_data.get("mimeType", "application/octet-stream")
+    f_data = md.get("fileMessageData") or md.get("audioMessageData") or md.get("imageMessageData") or md.get("documentMessageData") or {}
+    msg = (md.get("textMessageData", {}).get("textMessage", "") or md.get("extendedTextMessageData", {}).get("text", "") or f_data.get("caption", "")).strip()
+    m_url, m_mime = f_data.get("downloadUrl", ""), f_data.get("mimeType", "audio/ogg")
     if not cid or (not msg and not m_url) or msg.startswith(("🤖", "⏳", "🧬", "📊", "📄", "📽️", "⚠️", "🔐", "✅", "🚀", "📈", "🛠️", "🔔", "⏰", "💾", "📋", "🗑️")): return jsonify({"status": "ignore"}), 200
     mid = d.get("idMessage", "")
     if mid and mid in SEEN: return jsonify({"status": "dup"}), 200

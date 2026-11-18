@@ -7,11 +7,12 @@ logger = logging.getLogger("CoreAI")
 
 # بناء الروابط برمجيًا لحمايتها من اختصار متصفح الآيفون
 DEFAULT_G_URL = "".join(["https:/", "/api.green-api.", "com"])
+GROQ_MODELS_URL = "".join(["https:/", "/api.groq.", "com/openai/v1/models"])
 GROQ_API_URL = "".join(["https:/", "/api.groq.", "com/openai/v1/chat/completions"])
 GEMINI_BASE_URL = "".join(["https:/", "/generativelanguage.googleapis.", "com/v1beta/models/"])
 OPENROUTER_API_URL = "".join(["https:/", "/openrouter.", "ai/api/v1/chat/completions"])
 
-# إعدادات Green-API مع رابط افتراضي ذكي
+# إعدادات Green-API
 G_URL = (os.environ.get("GREEN_API_URL") or DEFAULT_G_URL).strip().rstrip("/")
 G_ID = os.environ.get("GREEN_API_ID", "").strip()
 G_TOK = os.environ.get("GREEN_API_TOKEN", "").strip()
@@ -48,48 +49,62 @@ def sb(method: str, table: str, payload=None, q: str = ""):
     return []
 
 def ai_ask(prompt: str, system_prompt: str) -> str:
-    # 1. الطبقة الأولى: Groq (فائق السرعة)
+    # 1. الطبقة الأولى: Groq (اكتشاف تلقائي للنماذج النشطة في حسابك)
     if GROQ_KEY:
-        groq_models = ["llama-3.1-8b-instant", "gemma2-9b-it", "mixtral-8x7b-32768"]
-        for model in groq_models:
-            try:
-                res = SESSION.post(
-                    GROQ_API_URL,
-                    json={
-                        "model": model,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": prompt},
-                        ],
-                        "temperature": 0.6,
-                    },
-                    headers={"Authorization": f"Bearer {GROQ_KEY}"},
-                    timeout=12,
-                )
-                if res.status_code == 200:
-                    return res.json()["choices"][0]["message"]["content"].strip()
-                logger.warning(f"Groq ({model}) failed [{res.status_code}]: {res.text[:120]}")
-            except Exception as e:
-                logger.warning(f"Groq ({model}) exception: {e}")
+        try:
+            m_res = SESSION.get(
+                GROQ_MODELS_URL,
+                headers={"Authorization": f"Bearer {GROQ_KEY}"},
+                timeout=8,
+            )
+            if m_res.status_code == 200:
+                models = [
+                    m["id"] for m in m_res.json().get("data", [])
+                    if not any(x in m["id"].lower() for x in ("whisper", "guard", "tts", "embed"))
+                ]
+                for model in models[:2]:
+                    res = SESSION.post(
+                        GROQ_API_URL,
+                        json={
+                            "model": model,
+                            "messages": [
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": prompt},
+                            ],
+                            "temperature": 0.6,
+                        },
+                        headers={"Authorization": f"Bearer {GROQ_KEY}"},
+                        timeout=15,
+                    )
+                    if res.status_code == 200:
+                        logger.info(f"AI Success via Groq ({model})")
+                        return res.json()["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            logger.warning(f"Groq exception: {e}")
 
-    # 2. الطبقة الثانية: Google Gemini
+    # 2. الطبقة الثانية: Google Gemini (اكتشاف تلقائي لأحدث نموذج متاح)
     if GEM_KEY:
-        gemini_models = ["gemini-2.5-flash", "gemini-2.0-flash"]
-        for g_model in gemini_models:
-            try:
-                url = f"{GEMINI_BASE_URL}{g_model}:generateContent?key={GEM_KEY}"
-                res = SESSION.post(
-                    url,
-                    json={
-                        "contents": [{"parts": [{"text": f"{system_prompt}\n\n{prompt}"}]}]
-                    },
-                    timeout=15,
-                )
-                if res.status_code == 200:
-                    return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-                logger.warning(f"Gemini ({g_model}) failed [{res.status_code}]: {res.text[:120]}")
-            except Exception as e:
-                logger.warning(f"Gemini ({g_model}) exception: {e}")
+        try:
+            list_url = f"{GEMINI_BASE_URL.rstrip('/')}?key={GEM_KEY}"
+            g_res = SESSION.get(list_url, timeout=8)
+            if g_res.status_code == 200:
+                g_models = [
+                    m["name"].replace("models/", "")
+                    for m in g_res.json().get("models", [])
+                    if "flash" in m["name"].lower() and "generateContent" in m.get("supportedGenerationMethods", [])
+                ]
+                for g_model in g_models[:2]:
+                    url = f"{GEMINI_BASE_URL}{g_model}:generateContent?key={GEM_KEY}"
+                    res = SESSION.post(
+                        url,
+                        json={"contents": [{"parts": [{"text": f"{system_prompt}\n\n{prompt}"}]}]},
+                        timeout=18,
+                    )
+                    if res.status_code == 200:
+                        logger.info(f"AI Success via Gemini ({g_model})")
+                        return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        except Exception as e:
+            logger.warning(f"Gemini exception: {e}")
 
     # 3. الطبقة الثالثة: OpenRouter
     if OR_KEY:
@@ -104,11 +119,11 @@ def ai_ask(prompt: str, system_prompt: str) -> str:
                     ],
                 },
                 headers={"Authorization": f"Bearer {OR_KEY}"},
-                timeout=18,
+                timeout=20,
             )
             if res.status_code == 200:
+                logger.info("AI Success via OpenRouter")
                 return res.json()["choices"][0]["message"]["content"].strip()
-            logger.warning(f"OpenRouter failed [{res.status_code}]: {res.text[:120]}")
         except Exception as e:
             logger.warning(f"OpenRouter exception: {e}")
 
@@ -118,7 +133,7 @@ def send_msg(chat_id: str, text: str):
     if not text or not chat_id:
         return
     if not G_ID or not G_TOK:
-        logger.error("Missing GREEN_API_ID or GREEN_API_TOKEN in environment variables!")
+        logger.error("Missing GREEN_API_ID or GREEN_API_TOKEN!")
         return
 
     url = f"{G_URL}/waInstance{G_ID}/sendMessage/{G_TOK}"
@@ -138,7 +153,7 @@ def send_msg(chat_id: str, text: str):
 
 def send_file(chat_id: str, path: str, name: str, mime: str, caption: str):
     if not G_ID or not G_TOK:
-        logger.error("Missing GREEN_API_ID or GREEN_API_TOKEN for file upload!")
+        logger.error("Missing GREEN_API_ID or GREEN_API_TOKEN!")
         return
 
     url = f"{G_URL}/waInstance{G_ID}/sendFileByUpload/{G_TOK}"

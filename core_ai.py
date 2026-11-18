@@ -1,5 +1,4 @@
 import os, requests
-from tenacity import retry, stop_after_attempt, wait_exponential
 
 G_URL = os.environ.get("GREEN_API_URL", "https://greenapi.com").strip().rstrip("/")
 G_ID = os.environ.get("GREEN_API_ID", "").strip()
@@ -9,12 +8,7 @@ GROQ_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 SB_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
 SB_KEY = os.environ.get("SUPABASE_KEY", "").strip()
 
-STRICT_POLICY = (
-    "\n[بروتوكول العمل المؤسسي الصارم]:\n"
-    "1. يُحظر تماماً ذكر اسم أي منظومة برمجية، نموذج ذكاء اصطناعي، أو أداة تقنية.\n"
-    "2. يُحظر وضع أي توقيع أو تذييل تعريفي في نهاية النصوص أو الملفات.\n"
-    "3. التزم باللغة العربية الفصحى الدقيقة، والأرقام الواقعية، والتنظيم الاحترافي المباشر."
-)
+STRICT_POLICY = "\n[قواعد صارمة]: اكتب محتوى غزيراً ومفصلاً باللغة العربية الفصحى. يُحظر ذكر اسم أي منظومة أو ذكاء اصطناعي أو وضع أي توقيع."
 
 def sb(m, t, p=None, q=""):
     if not SB_URL or not SB_KEY: return []
@@ -28,47 +22,31 @@ def sb(m, t, p=None, q=""):
     except Exception as e: print("SB Err:", e)
     return []
 
-@retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=2, max=5))
-def _call_groq(model, sys_p, usr_p):
-    u = "https://groq.com"
-    r = requests.post(
-        u,
-        json={"model": model, "messages": [{"role": "system", "content": sys_p}, {"role": "user", "content": usr_p}], "temperature": 0.4},
-        headers={"Authorization": f"Bearer {GROQ_KEY}"},
-        timeout=40
-    )
-    if r.status_code == 200:
-        return r.json()["choices"].pop(0)["message"]["content"].strip()
-    raise RuntimeError(f"Groq {model}: {r.status_code}")
-
-@retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=2, max=5))
-def _call_gemini(model, sys_p, usr_p):
-    u = f"https://googleapis.com{model}:generateContent?key={GEM_KEY}"
-    r = requests.post(
-        u,
-        json={"contents": [{"parts": [{"text": f"{sys_p}\n\n{usr_p}"}]}]},
-        timeout=65
-    )
-    if r.status_code == 200:
-        return r.json()["candidates"].pop(0)["content"]["parts"].pop(0)["text"].strip()
-    raise RuntimeError(f"Gem {model}: {r.status_code}")
-
 def ai_ask(p, s):
     clean_s = s + STRICT_POLICY
-    if GROQ_KEY:
-        for gm in ("openai/gpt-oss-120b", "openai/gpt-oss-20b"):
-            try: return _call_groq(gm, clean_s, p)
-            except Exception as e: print("Groq Fallback:", e)
     if GEM_KEY:
-        for gem in ("gemini-3.8-flash", "gemini-3.5-flash-lite"):
-            try: return _call_gemini(gem, clean_s, p)
-            except Exception as e: print("Gem Fallback:", e)
-    return "تمت معالجة الطلب وفق المعايير المعتمدة."
+        for gem in ("gemini-2.5-flash", "gemini-2.0-flash"):
+            try:
+                u = f"https://googleapis.com{gem}:generateContent?key={GEM_KEY}"
+                r = requests.post(u, json={"contents": [{"parts": [{"text": f"{clean_s}\n\n{p}"}]}]}, timeout=60)
+                if r.status_code == 200:
+                    return r.json()["candidates"].pop(0)["content"]["parts"].pop(0)["text"].strip()
+                print(f"Gem Err ({gem}):", r.status_code, r.text[:150])
+            except Exception as e: print(f"Gem Ex ({gem}):", e)
+    if GROQ_KEY:
+        for gm in ("llama-3.3-70b-versatile", "openai/gpt-oss-20b"):
+            try:
+                u = "https://groq.com"
+                r = requests.post(u, json={"model": gm, "messages": [{"role": "system", "content": clean_s}, {"role": "user", "content": p}]}, headers={"Authorization": f"Bearer {GROQ_KEY}"}, timeout=40)
+                if r.status_code == 200:
+                    return r.json()["choices"].pop(0)["message"]["content"].strip()
+                print(f"Groq Err ({gm}):", r.status_code, r.text[:150])
+            except Exception as e: print(f"Groq Ex ({gm}):", e)
+    return "⚠️ تعذر الاتصال بمحرك التوليد، يرجى التحقق من مفاتيح API."
 
 def send_msg(c, t):
     if t and G_URL:
-        try:
-            requests.post(f"{G_URL}/waInstance{G_ID}/sendMessage/{G_TOK}", json={"chatId": c, "message": t}, timeout=15)
+        try: requests.post(f"{G_URL}/waInstance{G_ID}/sendMessage/{G_TOK}", json={"chatId": c, "message": t}, timeout=15)
         except Exception as e: print("Send Err:", e)
 
 def send_file(c, path, name, mime, cap):

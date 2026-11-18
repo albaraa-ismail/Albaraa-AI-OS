@@ -12,18 +12,18 @@ def make_kpi(cid):
     send_file(cid, "/tmp/KPI.xlsx", "Performance_Report.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "📊 تقرير قياس الأداء وتطور الإنجاز")
 
 def make_word(cid, msg):
-    send_msg(cid, "⏳ جاري إعداد المستند...")
-    raw = ai_ask(msg, "اكتب مستنداً تنفيذياً رسمياً متكاملاً بالعربية بعناوين وفقرات منظمة بدون أي مقدمات:")
-    doc = Document(); doc.add_heading(msg[:45], 0)
+    send_msg(cid, "⏳ جاري إعداد المستند الاحترافي بدقة عالية...")
+    raw = ai_ask(msg, "اكتب مستنداً أكاديمياً وتنفيذياً متكاملاً وعالي الدقة باللغة العربية الفصحى، مقسماً إلى عناوين رئيسية وفقرات تفصيلية عميقة وشاملة:")
+    doc = Document(); doc.add_heading(msg[:50], 0)
     for l in raw.split("\n"):
         cl = l.strip().replace("**", "")
-        if cl: doc.add_heading(cl.lstrip("# "), level=1) if cl.startswith(("#", "أولاً", "ثانياً", "1.", "2.")) else doc.add_paragraph(cl)
+        if cl: doc.add_heading(cl.lstrip("# "), level=1) if cl.startswith(("#", "أولاً", "ثانياً", "ثالثاً", "1.", "2.", "3.", "الفصل")) else doc.add_paragraph(cl)
     doc.save("/tmp/Doc.docx")
     send_file(cid, "/tmp/Doc.docx", "Document.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "📄 المستند جاهز")
 
 def make_excel(cid, msg):
     send_msg(cid, "⏳ جاري بناء الجدول...")
-    raw = ai_ask(msg, "اكتب بيانات جدول منظم، كل سطر صف وتفصل الأعمدة بعلامة | فقط بدون أي نص إضافي:")
+    raw = ai_ask(msg, "اكتب بيانات جدول منظم ودقيق، كل سطر صف وتفصل الأعمدة بعلامة | فقط بدون أي نص إضافي:")
     wb = openpyxl.Workbook(); ws = wb.active; ws.sheet_view.rightToLeft = True
     for l in raw.split("\n"):
         if "|" in l: ws.append([x.strip() for x in l.split("|") if x.strip()])
@@ -31,9 +31,9 @@ def make_excel(cid, msg):
     send_file(cid, "/tmp/Out.xlsx", "Table_Data.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "📊 ملف البيانات جاهز")
 
 def make_ppt(cid, msg):
-    send_msg(cid, "⏳ جاري تصميم العرض التقديمي...")
-    raw = ai_ask(msg, "صمم 5 شرائح احترافية، عنوان كل شريحة بسطر وتحته 3 نقاط، وافصل بسطر فارغ:")
-    prs = Presentation(); s0 = prs.slides.add_slide(prs.slide_layouts); s0.shapes.title.text = msg[:40]; s0.placeholders.text = "عرض تنفيذي متكامل"
+    send_msg(cid, "⏳ جاري تصميم العرض التقديمي الاحترافي...")
+    raw = ai_ask(msg, "صمم 7 شرائح عرض تقديمي احترافية وعالية الدقة، عنوان كل شريحة بسطر وتحته 4 نقاط مركزة وعميقة، وافصل بين كل شريحة بسطر فارغ:")
+    prs = Presentation(); s0 = prs.slides.add_slide(prs.slide_layouts); s0.shapes.title.text = msg[:45]; s0.placeholders.text = "عرض تنفيذي وأكاديمي متكامل"
     for blk in [x.strip() for x in raw.split("\n\n") if x.strip()]:
         lns = [l.strip().replace("**", "") for l in blk.split("\n") if l.strip()]
         if lns:

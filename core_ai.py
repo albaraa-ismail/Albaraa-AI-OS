@@ -23,19 +23,21 @@ def sb(m, t, p=None, q=""):
 def ai_ask(p, s):
     clean_s = s + "\nقواعد صارمة: لا تذكر اسم أي منظومة برمجية أو ذكاء اصطناعي نهائياً. قدم المحتوى بصيغة عمل مؤسسي احترافي مباشر."
     if GROQ_KEY:
-        try:
-            u = "".join(["https:/", "/api.groq.", "com/openai/v1/chat/completions"])
-            r = requests.post(u, json={"model": "llama-3.1-8b-instant", "messages": [{"role": "system", "content": clean_s}, {"role": "user", "content": p}]}, headers={"Authorization": f"Bearer {GROQ_KEY}"}, timeout=20)
-            if r.status_code == 200: return r.json()["choices"].pop(0)["message"]["content"].strip()
-            print("Groq Err:", r.text)
-        except Exception as e: print("Groq Ex:", e)
+        for g_model in ("openai/gpt-oss-20b", "openai/gpt-oss-120b"):
+            try:
+                u = "https://api.groq.com/openai/v1/chat/completions"
+                r = requests.post(u, json={"model": g_model, "messages": [{"role": "system", "content": clean_s}, {"role": "user", "content": p}]}, headers={"Authorization": f"Bearer {GROQ_KEY}"}, timeout=35)
+                if r.status_code == 200: return r.json()["choices"].pop(0)["message"]["content"].strip()
+                print(f"Groq Err ({g_model}):", r.text)
+            except Exception as e: print(f"Groq Ex ({g_model}):", e)
     if GEM_KEY:
-        try:
-            u = "".join(["https:/", "/generativelanguage.googleapis.", "com/v1beta/models/gemini-3.8-flash:generateContent?key=", GEM_KEY])
-            r = requests.post(u, json={"contents": [{"parts": [{"text": f"{clean_s}\n{p}"}]}]}, timeout=25)
-            if r.status_code == 200: return r.json()["candidates"].pop(0)["content"]["parts"].pop(0)["text"].strip()
-            print("Gem Err:", r.text)
-        except Exception as e: print("Gem Ex:", e)
+        for gem_model in ("gemini-3.8-flash", "gemini-3.5-flash-lite"):
+            try:
+                u = f"https://generativelanguage.googleapis.com/v1beta/models/{gem_model}:generateContent?key={GEM_KEY}"
+                r = requests.post(u, json={"contents": [{"parts": [{"text": f"{clean_s}\n{p}"}]}]}, timeout=60)
+                if r.status_code == 200: return r.json()["candidates"].pop(0)["content"]["parts"].pop(0)["text"].strip()
+                print(f"Gem Err ({gem_model}):", r.text)
+            except Exception as e: print(f"Gem Ex ({gem_model}):", e)
     return "تم إنجاز المهمة بنجاح."
 
 def send_msg(c, t):

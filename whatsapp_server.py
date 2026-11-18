@@ -9,7 +9,7 @@ app = Flask(__name__)
 start_scheduler()
 SEEN = set()
 ADMIN_PHONE = os.environ.get("ADMIN_PHONE", "966575475336").strip()
-ALLOWED_GROUP = os.environ.get("ALLOWED_GROUP", "120363413772983962@g.us").strip()
+ALLOWED_GROUPS = [g.strip() for g in os.environ.get("ALLOWED_GROUP", "120363413772983962@g.us").split(",") if "@g.us" in g]
 
 def process_incoming(cid, msg, m_url, m_mime, role, sname):
     final_msg = analyze_media(m_url, m_mime, msg) if m_url else msg
@@ -27,14 +27,13 @@ def webhook():
     msg = (md.get("textMessageData", {}).get("textMessage", "") or md.get("extendedTextMessageData", {}).get("text", "") or f_data.get("caption", "")).strip()
     m_url, m_mime = f_data.get("downloadUrl", ""), f_data.get("mimeType", "audio/ogg")
     print(f"IN: {wt} | CID: {cid} | URL: {bool(m_url)} | MSG: {msg[:15]}")
-    if not cid or (not msg and not m_url) or msg.startswith(("🤖", "⏳", "🧬", "📊", "📄", "📽️", "⚠️", "🔐", "✅", "🚀", "📈", "🛠️", "🔔", "⏰", "💾", "📋", "🗑️")): return jsonify({"status": "ignore"}), 200
+    if not cid or (not msg and not m_url) or msg.startswith(("🤖", "⏳", "🎬", "🧬", "📊", "📄", "📽️", "⚠️", "🔐", "✅", "🚀", "📈", "🛠️", "🔔", "⏰", "💾", "📋", "🗑️")): return jsonify({"status": "ignore"}), 200
     mid = d.get("idMessage", "")
     if mid and mid in SEEN: return jsonify({"status": "dup"}), 200
     if mid: SEEN.add(mid)
     is_out = "outgoing" in wt
     is_admin = is_out or (ADMIN_PHONE in (sender or cid))
-    if not (("@c.us" in cid and ADMIN_PHONE in cid) or (cid == ALLOWED_GROUP)):
-        print(f"BLOCKED: {cid} != {ALLOWED_GROUP}")
+    if not (("@c.us" in cid and ADMIN_PHONE in cid) or (cid in ALLOWED_GROUPS)):
         return jsonify({"status": "blocked"}), 200
     role = "admin" if is_admin else "co_lead"
     threading.Thread(target=process_incoming, args=(cid, msg, m_url, m_mime, role, sname)).start()

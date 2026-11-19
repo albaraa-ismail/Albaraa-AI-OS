@@ -52,7 +52,7 @@ def ai_ask(prompt: str, system_prompt: str = "", temperature: float = 0.3) -> st
     full_sys = (system_prompt + STRICT_POLICY).strip()
 
     if GEM_KEY:
-        for model in ("gemini-2.5-flash", "gemini-2.0-flash"):
+        for model in ("gemini-2.5-flash",):
             try:
                 url = f"{GEMINI_BASE_URL}{model}:generateContent?key={GEM_KEY}"
                 payload = {
@@ -60,7 +60,7 @@ def ai_ask(prompt: str, system_prompt: str = "", temperature: float = 0.3) -> st
                     "contents": [{"parts": [{"text": prompt}]}],
                     "generationConfig": {"temperature": temperature}
                 }
-                r = requests.post(url, json=payload, timeout=45)
+                r = requests.post(url, json=payload, timeout=12)
                 if r.status_code == 200:
                     data = r.json()
                     txt = data["candidates"][0]["content"]["parts"][0]["text"].strip()

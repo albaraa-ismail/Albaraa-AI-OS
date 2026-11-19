@@ -19,9 +19,9 @@ def sb(m, t, p=None, q=""):
     u = f"{SB_URL}/rest/v1/{t}{q}"
     h = {"apikey": SB_KEY, "Authorization": f"Bearer {SB_KEY}", "Content-Type": "application/json", "Prefer": "return=representation"}
     try:
-        if m == "GET": r = requests.get(u, headers=h, timeout=12)
-        elif m == "PATCH": r = requests.patch(u, json=p, headers=h, timeout=12)
-        else: r = requests.post(u, json=p, headers=h, timeout=12)
+        if m == "GET": r = requests.get(u, headers=h, timeout=10)
+        elif m == "PATCH": r = requests.patch(u, json=p, headers=h, timeout=10)
+        else: r = requests.post(u, json=p, headers=h, timeout=10)
         if r.status_code in (200, 201, 204): return r.json() if r.text else []
     except Exception as e: print("SB Err:", e, flush=True)
     return []
@@ -30,22 +30,24 @@ def ai_ask(p, s):
     clean_s, err = s + POLICY, "لا توجد مفاتيح"
     if GROQ_KEY:
         u_g = base64.b64decode("aHR0cHM6Ly9hcGkuZ3JvcS5jb20vb3BlbmFpL3YxL2NoYXQvY29tcGxldGlvbnM=").decode()
-        for gm in ("llama-3.3-70b-versatile", "qwen/qwen3-32b", "openai/gpt-oss-120b"):
+        for gm in ("llama-3.3-70b-versatile", "qwen/qwen3-32b"):
             try:
-                r = requests.post(u_g, json={"model": gm, "messages": [{"role": "system", "content": clean_s}, {"role": "user", "content": p}], "temperature": 0.35}, headers={"Authorization": f"Bearer {GROQ_KEY}"}, timeout=35)
+                r = requests.post(u_g, json={"model": gm, "messages": [{"role": "system", "content": clean_s}, {"role": "user", "content": p}], "temperature": 0.35}, headers={"Authorization": f"Bearer {GROQ_KEY}"}, timeout=18)
                 if r.status_code == 200:
                     choices = r.json().get("choices", [])
                     if choices:
                         txt = choices.pop(0).get("message", {}).get("content", "").strip()
                         if txt and not _is_refusal(txt): return txt
                 err = f"Groq({gm}):{r.status_code}"
-                if r.status_code == 429: time.sleep(2)
-            except Exception as e: err = f"GroqEx:{str(e)[:30]}"
+                print("AI WARN:", err, flush=True)
+            except Exception as e:
+                err = f"GroqEx:{str(e)[:25]}"
+                print("AI WARN:", err, flush=True)
     if GEM_KEY:
         b_gem = base64.b64decode("aHR0cHM6Ly9nZW5lcmF0aXZlbGFuZ3VhZ2UuZ29vZ2xlYXBpcy5jb20vdjFiZXRhL21vZGVscy8=").decode()
         for gem in ("gemini-2.5-flash", "gemini-2.0-flash"):
             try:
-                r = requests.post(f"{b_gem}{gem}:generateContent?key={GEM_KEY}", json={"contents": [{"parts": [{"text": f"{clean_s}\n\n{p}"}]}]}, timeout=55)
+                r = requests.post(f"{b_gem}{gem}:generateContent?key={GEM_KEY}", json={"contents": [{"parts": [{"text": f"{clean_s}\n\n{p}"}]}]}, timeout=20)
                 if r.status_code == 200:
                     cands = r.json().get("candidates", [])
                     if cands:
@@ -54,14 +56,16 @@ def ai_ask(p, s):
                             txt = parts.pop(0).get("text", "").strip()
                             if txt and not _is_refusal(txt): return txt
                 err = f"Gem({gem}):{r.status_code}"
-                if r.status_code == 429: time.sleep(2)
-            except Exception as e: err = f"GemEx:{str(e)[:30]}"
+                print("AI WARN:", err, flush=True)
+            except Exception as e:
+                err = f"GemEx:{str(e)[:25]}"
+                print("AI WARN:", err, flush=True)
     return f"⚠️ تعذر التوليد ({err})"
 
 def send_msg(c, t):
     if t and G_URL:
         try:
-            r = requests.post(f"{G_URL}/waInstance{G_ID}/sendMessage/{G_TOK}", json={"chatId": c, "message": t}, timeout=15)
+            r = requests.post(f"{G_URL}/waInstance{G_ID}/sendMessage/{G_TOK}", json={"chatId": c, "message": t}, timeout=12)
             print(f"GREEN SEND [{r.status_code}]", flush=True)
         except Exception as e: print("Send Err:", e, flush=True)
 

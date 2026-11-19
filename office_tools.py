@@ -40,7 +40,11 @@ def make_word(cid, msg):
     send_msg(cid, "👥 *تفعيل غرفة عمليات الوثائق:*\n1️⃣ وكيل التخطيط يبني الهيكل...\n2️⃣ وكيل التحرير يصيغ المحاور...\n3️⃣ وكيل التدقيق يراجع الجودة...")
     formal_title = _clean_title(msg)
     outline = ai_ask(msg, "ضع خطة هيكلية احترافية من 5 محاور رئيسية لتغطية هذا الموضوع بعمق أكاديمي وتنفيذي. اكتب كل محور في سطر مستقل بدون مقدمات:")
-    sections = [s.strip().lstrip("-*#1234567890. ") for s in outline.split("\n") if len(s.strip()) > 3][:5]
+    sections = []
+    for s in outline.split("\n"):
+        clean_s = s.strip().lstrip("-*#1234567890. ")
+        if len(clean_s) > 3 and len(sections) < 5:
+            sections.append(clean_s)
     if not sections:
         sections = ["المقدمة والإطار العام", "التحليل والمنهجية", "التطبيقات العملية", "مؤشرات الأداء والقياس", "النتائج والتوصيات"]
 
@@ -95,26 +99,17 @@ def make_excel(cid, msg):
     )
 
     wb = openpyxl.Workbook()
-
-    # ==========================================
-    # الورقة 1: لوحة القيادة البصرية (Dashboard)
-    # ==========================================
     ws_dash = wb.active
     ws_dash.title = "لوحة القيادة"
     ws_dash.sheet_view.rightToLeft = True
     ws_dash.sheet_view.showGridLines = False
 
-    # ==========================================
-    # الورقة 2: البيانات التفصيلية والمعادلات
-    # ==========================================
     ws_data = wb.create_sheet(title="البيانات والتحليل")
     ws_data.sheet_view.rightToLeft = True
     ws_data.sheet_view.showGridLines = True
 
-    # لوحة الألوان الهندسية
     c_navy = "0B192C"
     c_slate = "1E3E62"
-    c_accent = "FF6500"
     c_gold = "FFD166"
     c_bg = "F1F5F9"
     c_white = "FFFFFF"
@@ -128,28 +123,22 @@ def make_excel(cid, msg):
     fill_bg = PatternFill(start_color=c_bg, end_color=c_bg, fill_type="solid")
     fill_white = PatternFill(start_color=c_white, end_color=c_white, fill_type="solid")
     fill_zebra = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
-    fill_green = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
-    fill_blue = PatternFill(start_color="DBEAFE", end_color="DBEAFE", fill_type="solid")
-    fill_amber = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
 
     thin = Side(style='thin', color='CBD5E1')
-    med_navy = Side(style='medium', color=c_navy)
     b_cell = Border(left=thin, right=thin, top=thin, bottom=thin)
-    b_card = Border(left=thin, right=thin, top=med_navy, bottom=thin)
 
-    # تجهيز البيانات وتنظيفها
     parsed = []
     for l in raw.split("\n"):
         if "|" in l and not set(l.replace("|", "").strip()).issubset({"-", ":", " "}):
             row_vals = []
             for x in l.split("|"):
                 v = x.strip().replace("**", "")
-                if v:
+                if v and len(row_vals) < 5:
                     try: v = float(v) if "." in v else int(v)
                     except ValueError: pass
                     row_vals.append(v)
             if len(row_vals) >= 4:
-                parsed.append(row_vals[:5])
+                parsed.append(row_vals)
 
     if len(parsed) < 2:
         parsed = [
@@ -159,7 +148,6 @@ def make_excel(cid, msg):
             ["مؤشر سرعة الإنجاز", "التطوير", 96, 85, "أعلى معدل أداء"]
         ]
 
-    # تعبئة ورقة البيانات بالمعادلات الحية
     headers = ["البند / الموظف", "الإدارة / التصنيف", "المحقق الفعلي", "المستهدف المخطط", "نسبة الإنجاز %", "الفارق عن المستهدف", "التقييم الآلي", "ملاحظات المتابعة"]
     ws_data.row_dimensions.height = 30
     for col_idx, h_text in enumerate(headers, start=1):
@@ -169,16 +157,22 @@ def make_excel(cid, msg):
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         cell.border = b_cell
 
-    data_rows = parsed[1:]
+    it_parsed = iter(parsed)
+    next(it_parsed, None)
+    data_rows = list(it_parsed)
     last_row = len(data_rows) + 1
 
     for idx, r in enumerate(data_rows, start=2):
         ws_data.row_dimensions[idx].height = 24
-        name_v = r
-        dept_v = r[1]
-        act_v = r[2] if isinstance(r[2], (int, float)) else 85
-        tgt_v = r[3] if isinstance(r[3], (int, float)) else 90
-        note_v = r[4] if len(r) > 4 else "متابعة دورية مستمرة"
+        it_r = iter(r)
+        name_v = str(next(it_r, "بند تنفيذي"))
+        dept_v = str(next(it_r, "عام"))
+        raw_act = next(it_r, 85)
+        raw_tgt = next(it_r, 90)
+        note_v = str(next(it_r, "متابعة دورية مستمرة"))
+
+        act_v = raw_act if isinstance(raw_act, (int, float)) else 85
+        tgt_v = raw_tgt if isinstance(raw_tgt, (int, float)) else 90
 
         row_entries = [
             name_v,
@@ -198,12 +192,11 @@ def make_excel(cid, msg):
             cell.alignment = Alignment(horizontal="center" if c_idx in (3, 4, 5, 6, 7) else "right", vertical="center")
             if idx % 2 == 0: cell.fill = fill_zebra
 
-    # صف الإجماليات والمتوسطات في ورقة البيانات
     tot_row = last_row + 1
     ws_data.row_dimensions[tot_row].height = 28
     tot_entries = [
         "الإجمالي / المتوسط العام",
-        f"=COUNTA(A2:A{last_row}) & \" سجل\"",
+        f'=COUNTA(A2:A{last_row}) & " سجل"',
         f"=SUM(C2:C{last_row})",
         f"=SUM(D2:D{last_row})",
         f"=ROUND(AVERAGE(E2:E{last_row}), 1)",
@@ -214,3 +207,14 @@ def make_excel(cid, msg):
     for c_idx, val in enumerate(tot_entries, start=1):
         cell = ws_data.cell(row=tot_row, column=c_idx, value=val)
         cell.fill = fill_slate
+        cell.font = Font(color=c_white, bold=True, size=11)
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = b_cell
+
+    data_bar = DataBarRule(start_type='num', start_value=0, end_type='num', end_value=110, color="0EA5E9", showValue=True)
+    ws_data.conditional_formatting.add(f"E2:E{last_row}", data_bar)
+
+    for c_idx in range(1, 9):
+        col_ltr = get_column_letter(c_idx)
+        ws_data.column_dimensions[col_ltr].width = 24 if c_idx in (1, 8) else 18
+

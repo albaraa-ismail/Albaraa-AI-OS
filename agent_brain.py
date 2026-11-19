@@ -7,7 +7,7 @@ from core_ai import sb, ai_ask, send_msg, send_file
 from memory_engine import get_context, save_memory
 from office_tools import make_kpi, make_word, make_excel, make_pptx
 from video_studio import make_video
-from agents.research_agent import fetch_live_knowledge
+import agents.research_agent as research_agent
 from agents.learning_agent import QualityReviewerAgent
 from agents.builder_agent import BuilderAgent
 
@@ -16,7 +16,8 @@ def _real_multi_agent_pipeline(cid: str, msg: str, ctx: str, agents_list: list) 
     send_msg(cid, "🔍 *المرحلة 1/3 (وكيل البحث):* جاري البحث عن بيانات ومصادر حقيقية...")
     web_facts = ""
     try:
-        web_facts = fetch_live_knowledge(msg[:120])
+     fn_r = getattr(research_agent, "fetch_live_knowledge", None) or getattr(research_agent, "search_web", None) or getattr(research_agent, "research_topic", None)
+     if fn_r: web_facts = fn_r(msg[:120])
     except Exception as e:
         print("Research Agent Err:", e, flush=True)
 

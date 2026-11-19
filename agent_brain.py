@@ -80,3 +80,4 @@ def run_task(cid, msg, role, sname):
 
     growth = min(99, 85 + len(sb("GET", "telemetry_kpis", q=f"?user_id=eq.{cid}&limit=15")))
     sb("POST", "telemetry_kpis", {"user_id": cid, "user_role": role, "unit_used": "منظومة الوكلاء", "task_complexity": "متقدم", "response_time_sec": round(time.time() - t0, 2), "time_saved_min": 45, "user_growth_score": growth, "deliverable_type": dtype})
+ 

@@ -29,7 +29,7 @@ def ai_ask(p, s):
         for gm in ("openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3-32b", "llama-3.3-70b-versatile"):
             try:
                 r = requests.post(u_g, json={"model": gm, "messages": [{"role": "system", "content": clean_s}, {"role": "user", "content": p}]}, headers={"Authorization": f"Bearer {GROQ_KEY}"}, timeout=35)
-                if r.status_code == 200: return r.json()["choices"].pop(0)["message"]["content"].strip()
+                if r.status_code == 200: return r.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
                 err = f"Groq({gm}):{r.status_code}"
                 if r.status_code == 429: time.sleep(2)
             except Exception as e: err = f"GroqEx:{str(e)[:30]}"
@@ -38,7 +38,7 @@ def ai_ask(p, s):
         for gem in ("gemini-3-flash-preview", "gemini-3.1-flash-lite-preview", "gemini-2.5-flash"):
             try:
                 r = requests.post(f"{b_gem}{gem}:generateContent?key={GEM_KEY}", json={"contents": [{"parts": [{"text": f"{clean_s}\n\n{p}"}]}]}, timeout=55)
-                if r.status_code == 200: return r.json()["candidates"].pop(0)["content"]["parts"].pop(0)["text"].strip()
+                if r.status_code == 200: return r.json().get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
                 err = f"Gem({gem}):{r.status_code}"
                 if r.status_code == 429: time.sleep(2)
             except Exception as e: err = f"GemEx:{str(e)[:30]}"

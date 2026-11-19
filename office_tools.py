@@ -80,23 +80,28 @@ def make_excel(cid, msg):
     from openpyxl.formatting.rule import DataBarRule
 
     send_msg(cid, "👥 *هندسة لوحة القيادة التفاعلية:*\n1️⃣ بناء قاعدة البيانات والمعادلات الحية...\n2️⃣ تصميم واجهة المؤشرات والرسوم البيانية...")
-    formal_title = _clean_title(msg)
+    print("EXCEL STEP 1: Calling AI...", flush=True)
 
-    prompt_data = (
-        "أنشئ بيانات واقعية غنية ومفصلة من 16 صفاً (صف عناوين + 15 صف بيانات حقيقية) بـ 5 أعمدة بالضبط:\n"
-        "العمود 1: الاسم أو البند أو المبادرة (نص واقعي)\n"
-        "العمود 2: الإدارة أو التصنيف (نص)\n"
-        "العمود 3: المحقق الفعلي (رقم صحيح واقعي بين 65 و 120)\n"
-        "العمود 4: المستهدف المخطط (رقم صحيح واقعي بين 80 و 110)\n"
-        "العمود 5: ملاحظة تنفيذية موجزة (جملة قصيرة من 3 كلمات)\n"
-        "افصل بين الأعمدة بعلامة | فقط بدون مقدمات أو خطوط فصل."
+    prompt_all = (
+        "أنت مهندس بيانات خبير. أنشئ مخرجاً منظماً من 3 أقسام بالضبط مفصولة بسطر يحتوي على === فقط:\n"
+        "القسم 1: عنوان رسمي ومؤسسي فخم للتقرير من 3 إلى 6 كلمات بدون أي أفعال أمر مثل (عطني، صمم، اكتب).\n"
+        "القسم 2: جدول بيانات من 13 صفاً (صف عناوين + 12 صف بيانات واقعية) بـ 5 أعمدة مفصولة بعلامة | فقط:\n"
+        "العمود 1: الاسم أو البند | العمود 2: الإدارة | العمود 3: المحقق الفعلي (رقم من 70 إلى 115) | العمود 4: المستهدف (رقم من 85 إلى 105) | العمود 5: ملاحظة موجزة\n"
+        "القسم 3: ملخص تنفيذي من 3 نقاط قصيرة ومباشرة يبرز أهم الاستنتاجات والتوصيات.\n"
+        "التزم بالفصل بعلامة === بين الأقسام الثلاثة بدون أي مقدمات."
     )
-    raw = ai_ask(msg, prompt_data)
+    full_res = ai_ask(msg, prompt_all)
+    print("EXCEL STEP 2: AI Done, len=", len(full_res), flush=True)
 
-    summary_txt = ai_ask(
-        f"الموضوع: {formal_title}\nالبيانات:\n{raw[:1200]}",
-        "اكتب ملخصاً تنفيذياً مركزاً من 3 نقاط قصيرة ومباشرة يبرز أهم الاستنتاجات والتوصيات بناءً على هذه البيانات (بدون مقدمات):"
-    )
+    parts = [p.strip() for p in full_res.split("===") if p.strip()]
+    it_parts = iter(parts)
+    p1 = next(it_parts, "")
+    p2 = next(it_parts, "")
+    p3 = next(it_parts, "")
+
+    formal_title = p1.replace('"', '').strip()[:60] if (p1 and len(p1) < 90 and "|" not in p1) else "تقرير مؤشرات الأداء الاستراتيجية"
+    raw = p2 if "|" in p2 else full_res
+    summary_txt = p3 if p3 else "تحليل مؤشرات الأداء يظهر استقراراً عاماً مع فرص لتعزيز الكفاءة التشغيلية وتحقيق المستهدفات المخططة."
 
     wb = openpyxl.Workbook()
     ws_dash = wb.active
@@ -108,15 +113,8 @@ def make_excel(cid, msg):
     ws_data.sheet_view.rightToLeft = True
     ws_data.sheet_view.showGridLines = True
 
-    c_navy = "0B192C"
-    c_slate = "1E3E62"
-    c_gold = "FFD166"
-    c_bg = "F1F5F9"
-    c_white = "FFFFFF"
-    c_card_1 = "1E3A8A"
-    c_card_2 = "0F766E"
-    c_card_3 = "B45309"
-    c_card_4 = "4338CA"
+    c_navy, c_slate, c_gold, c_bg, c_white = "0B192C", "1E3E62", "FFD166", "F1F5F9", "FFFFFF"
+    c_card_1, c_card_2, c_card_3, c_card_4 = "1E3A8A", "0F766E", "B45309", "4338CA"
 
     fill_navy = PatternFill(start_color=c_navy, end_color=c_navy, fill_type="solid")
     fill_slate = PatternFill(start_color=c_slate, end_color=c_slate, fill_type="solid")
@@ -207,14 +205,3 @@ def make_excel(cid, msg):
     for c_idx, val in enumerate(tot_entries, start=1):
         cell = ws_data.cell(row=tot_row, column=c_idx, value=val)
         cell.fill = fill_slate
-        cell.font = Font(color=c_white, bold=True, size=11)
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.border = b_cell
-
-    data_bar = DataBarRule(start_type='num', start_value=0, end_type='num', end_value=110, color="0EA5E9", showValue=True)
-    ws_data.conditional_formatting.add(f"E2:E{last_row}", data_bar)
-
-    for c_idx in range(1, 9):
-        col_ltr = get_column_letter(c_idx)
-        ws_data.column_dimensions[col_ltr].width = 24 if c_idx in (1, 8) else 18
-

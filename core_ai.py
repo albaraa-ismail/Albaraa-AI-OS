@@ -1,6 +1,6 @@
-import os, time, requests
+import os, time, base64, requests
 
-G_URL = os.environ.get("GREEN_API_URL", "https://greenapi.com").strip().rstrip("/")
+G_URL = os.environ.get("GREEN_API_URL", "").strip().rstrip("/")
 G_ID = os.environ.get("GREEN_API_ID", "").strip()
 G_TOK = os.environ.get("GREEN_API_TOKEN", "").strip()
 GEM_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
@@ -8,7 +8,7 @@ GROQ_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 SB_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
 SB_KEY = os.environ.get("SUPABASE_KEY", "").strip()
 
-STRICT_POLICY = "\n[قواعد صارمة]: اكتب محتوى غزيراً ومفصلاً باللغة العربية الفصحى. يُحظر ذكر اسم أي منظومة أو ذكاء اصطناعي أو وضع أي توقيع."
+POLICY = "\n[قواعد صارمة]: اكتب محتوى عميقاً ومنظماً باللغة العربية الفصحى. يُحظر ذكر اسم أي منظومة أو ذكاء اصطناعي أو وضع أي توقيع."
 
 def sb(m, t, p=None, q=""):
     if not SB_URL or not SB_KEY: return []
@@ -23,31 +23,26 @@ def sb(m, t, p=None, q=""):
     return []
 
 def ai_ask(p, s):
-    clean_s = s + STRICT_POLICY
-    last_err = "لا توجد مفاتيح"
+    clean_s, err = s + POLICY, "لا توجد مفاتيح"
     if GROQ_KEY:
-        u_groq = "".join(["https:", "//", "://groq.com", "/openai/v1/chat/completions"])
+        u_g = base64.b64decode("aHR0cHM6Ly9hcGkuZ3JvcS5jb20vb3BlbmFpL3YxL2NoYXQvY29tcGxldGlvbnM=").decode()
         for gm in ("llama-3.3-70b-versatile", "llama-3.1-8b-instant", "gemma2-9b-it"):
             try:
-                r = requests.post(u_groq, json={"model": gm, "messages": [{"role": "system", "content": clean_s}, {"role": "user", "content": p}]}, headers={"Authorization": f"Bearer {GROQ_KEY}"}, timeout=35)
-                if r.status_code == 200:
-                    return r.json()["choices"].pop(0)["message"]["content"].strip()
-                last_err = f"Groq({gm}): {r.status_code}"
-                print(last_err, r.text[:100])
+                r = requests.post(u_g, json={"model": gm, "messages": [{"role": "system", "content": clean_s}, {"role": "user", "content": p}]}, headers={"Authorization": f"Bearer {GROQ_KEY}"}, timeout=35)
+                if r.status_code == 200: return r.json()["choices"].pop(0)["message"]["content"].strip()
+                err = f"Groq({gm}):{r.status_code}"
                 if r.status_code == 429: time.sleep(2)
-            except Exception as e: last_err = f"GroqEx: {str(e)[:40]}"
+            except Exception as e: err = f"GroqEx:{str(e)[:30]}"
     if GEM_KEY:
+        b_gem = base64.b64decode("aHR0cHM6Ly9nZW5lcmF0aXZlbGFuZ3VhZ2UuZ29vZ2xlYXBpcy5jb20vdjFiZXRhL21vZGVscy8=").decode()
         for gem in ("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"):
             try:
-                u_gem = "".join(["https:", "//", "://googleapis.com", "/v1beta/models/", gem, ":generateContent?key=", GEM_KEY])
-                r = requests.post(u_gem, json={"contents": [{"parts": [{"text": f"{clean_s}\n\n{p}"}]}]}, timeout=55)
-                if r.status_code == 200:
-                    return r.json()["candidates"].pop(0)["content"]["parts"].pop(0)["text"].strip()
-                last_err = f"Gem({gem}): {r.status_code}"
-                print(last_err, r.text[:100])
+                r = requests.post(f"{b_gem}{gem}:generateContent?key={GEM_KEY}", json={"contents": [{"parts": [{"text": f"{clean_s}\n\n{p}"}]}]}, timeout=55)
+                if r.status_code == 200: return r.json()["candidates"].pop(0)["content"]["parts"].pop(0)["text"].strip()
+                err = f"Gem({gem}):{r.status_code}"
                 if r.status_code == 429: time.sleep(2)
-            except Exception as e: last_err = f"GemEx: {str(e)[:40]}"
-    return f"⚠️ تعذر التوليد ({last_err})"
+            except Exception as e: err = f"GemEx:{str(e)[:30]}"
+    return f"⚠️ تعذر التوليد ({err})"
 
 def send_msg(c, t):
     if t and G_URL:

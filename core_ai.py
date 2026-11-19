@@ -53,7 +53,7 @@ def ai_ask(prompt: str, system_prompt: str = "", temperature: float = 0.3) -> st
     safe_prompt = prompt[:28000]
 
     if GEM_KEY:
-        for model in ("gemini-3-flash-preview", "gemini-2.5-flash", "gemini-3.1-flash-lite-preview"):
+        for model in ("gemini-3.8-flash", "gemini-3.1-flash-lite-preview", "gemini-3-flash-preview"):
             try:
                 url = f"{GEMINI_BASE_URL}{model}:generateContent?key={GEM_KEY}"
                 payload = {
@@ -61,10 +61,10 @@ def ai_ask(prompt: str, system_prompt: str = "", temperature: float = 0.3) -> st
                     "contents": [{"parts": [{"text": safe_prompt}]}],
                     "generationConfig": {"temperature": temperature}
                 }
-                r = requests.post(url, json=payload, timeout=35)
+                r = requests.post(url, json=payload, timeout=20)
                 if r.status_code == 200:
                     data = r.json()
-                    txt = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                    txt = data["candidates"]["content"]["parts"]["text"].strip()
                     if txt:
                         return txt
                 else:
@@ -81,9 +81,9 @@ def ai_ask(prompt: str, system_prompt: str = "", temperature: float = 0.3) -> st
                     "messages": [{"role": "system", "content": full_sys}, {"role": "user", "content": safe_prompt}],
                     "temperature": temperature
                 }
-                r = requests.post(_GROQ_URL, headers=headers, json=payload, timeout=30)
+                r = requests.post(_GROQ_URL, headers=headers, json=payload, timeout=25)
                 if r.status_code == 200:
-                    txt = r.json()["choices"][0]["message"]["content"].strip()
+                    txt = r.json()["choices"]["message"]["content"].strip()
                     if txt:
                         return txt
                 else:
@@ -100,9 +100,9 @@ def ai_ask(prompt: str, system_prompt: str = "", temperature: float = 0.3) -> st
                     "messages": [{"role": "system", "content": full_sys}, {"role": "user", "content": safe_prompt}],
                     "temperature": temperature
                 }
-                r = requests.post(_OR_URL, headers=headers, json=payload, timeout=45)
+                r = requests.post(_OR_URL, headers=headers, json=payload, timeout=35)
                 if r.status_code == 200:
-                    txt = r.json()["choices"][0]["message"]["content"].strip()
+                    txt = r.json()["choices"]["message"]["content"].strip()
                     if txt:
                         return txt
                 else:

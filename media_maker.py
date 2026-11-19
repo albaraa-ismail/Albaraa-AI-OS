@@ -1,47 +1,66 @@
-import os, json, asyncio, subprocess
-from pptx import Presentation
-from pptx.util import Inches, Pt
-from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN
-import edge_tts
-from gtts import gTTS
-from PIL import Image, ImageDraw, ImageFont
-import arabic_reshaper
-from bidi.algorithm import get_display
-import plotly.graph_objects as go
-import imageio_ffmpeg
-from duckduckgo_search import DDGS
+import os, json, asyncio, subprocess, gc
 from core_ai import ai_ask, send_msg, send_file
 from office_tools import today_dates
 
 def _ar_txt(text):
+    import arabic_reshaper
+    from bidi.algorithm import get_display
     return get_display(arabic_reshaper.reshape(str(text)))
 
 async def _edge_voice(text, path):
+    import edge_tts
     await edge_tts.Communicate(text, "ar-SA-HamedNeural").save(path)
 
 def _make_audio(text, path):
     try: asyncio.run(_edge_voice(text, path))
-    except Exception: gTTS(text=text, lang='ar').save(path)
+    except Exception:
+        from gtts import gTTS
+        gTTS(text=text, lang='ar').save(path)
 
 def _style_slide(slide, bg_rgb=(15, 28, 46)):
+    from pptx.dml.color import RGBColor
     fill = slide.background.fill
     fill.solid()
     fill.fore_color.rgb = RGBColor(*bg_rgb)
 
 def _make_dynamic_chart(msg, research_data, out_path):
     try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+
         raw = ai_ask(f"الموضوع: {msg}\nالبيانات:\n{research_data}", 'استخرج 5 مؤشرات رقمية واقعية من البيانات بصيغة JSON فقط: {"title": "عنوان الرسم", "labels": ["أ", "ب", "ج", "د", "هـ"], "values": [85, 90, 78, 92, 88]}')
         d = json.loads(raw[raw.find("{"):raw.rfind("}")+1])
         ar_labels = [_ar_txt(l[:18]) for l in d["labels"][:5]]
         vals = d["values"][:5]
-        fig = go.Figure(data=[go.Bar(x=ar_labels, y=vals, text=vals, textposition='auto', marker_color=['#00B4D8', '#0096C7', '#0077B6', '#48CAE4', '#90E0EF'])])
-        fig.update_layout(title=dict(text=_ar_txt(d.get("title", "التحليل البياني")[:45]), x=0.5, font=dict(size=22, color='#FFD166')), plot_bgcolor='#0F1C2E', paper_bgcolor='#0F1C2E', font=dict(color='white', size=15), width=950, height=500)
-        fig.write_image(out_path, scale=2)
+
+        fig, ax = plt.subplots(figsize=(9.5, 5), dpi=150)
+        fig.patch.set_facecolor('#0F1C2E')
+        ax.set_facecolor('#0F1C2E')
+        bars = ax.bar(ar_labels, vals, color=['#00B4D8', '#0096C7', '#0077B6', '#48CAE4', '#90E0EF'], width=0.5)
+        ax.set_title(_ar_txt(d.get("title", "التحليل البياني")[:45]), color='#FFD166', fontsize=16, pad=15)
+        ax.tick_params(colors='white', labelsize=11)
+        for spine in ax.spines.values(): spine.set_visible(False)
+        for bar in bars:
+            yval = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2, yval + 1, str(yval), ha='center', va='bottom', color='white', fontsize=11)
+
+        plt.tight_layout()
+        plt.savefig(out_path, facecolor='#0F1C2E')
+        plt.close(fig)
+        gc.collect()
         return os.path.exists(out_path)
-    except Exception: return False
+    except Exception as e:
+        print("Chart Err:", e, flush=True)
+        return False
 
 def make_ppt(cid, msg):
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN
+    from duckduckgo_search import DDGS
+
     send_msg(cid, "👥 *تفعيل غرفة عمليات العرض التقديمي:*\n1️⃣ وكيل البحث يجمع أحدث البيانات...\n2️⃣ وكيل البناء يصيغ الشرائح التنفيذية...\n3️⃣ وكيل الحوكمة يضبط الهوية البصرية...")
     web = ""
     try:
@@ -90,8 +109,12 @@ def make_ppt(cid, msg):
     prs.save(path)
     send_file(cid, path, "Executive_Presentation.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", f"📽️ تم إنجاز العرض عبر 3 وكلاء متخصصين: *{clean_title}*\n💡 هل تود تحويل هذا العرض إلى فيديو بصوت بشري أو تقرير Word مفصل؟")
     if os.path.exists(path): os.remove(path)
+    del prs; gc.collect()
 
 def make_video(cid, msg):
+    from PIL import Image, ImageDraw, ImageFont
+    import imageio_ffmpeg
+
     send_msg(cid, "🎬 *غرفة إنتاج الفيديو:*\n1️⃣ وكيل البحث يجمع الحقائق...\n2️⃣ وكيل السيناريو يكتب المشاهد...\n3️⃣ استوديو الصوت والصورة يدمج المقطع...")
     script = ai_ask(msg, "اكتب سيناريو فيديو احترافي من 6 مشاهد متسلسلة. لكل مشهد اكتب سطراً واحداً بصيغة: العنوان | النص الصوتي المفصل (3 جمل كاملة باللغة العربية الفصحى):")
     scenes = [tuple(p.strip().replace("**", "") for p in l.split("|") if p.strip())[:2] for l in script.split("\n") if "|" in l and len(l.split("|")) >= 2]
@@ -134,3 +157,4 @@ def make_video(cid, msg):
         if os.path.exists(f):
             try: os.remove(f)
             except Exception: pass
+    gc.collect()

@@ -1,5 +1,6 @@
 import os, openpyxl, pendulum
 from hijridate import Gregorian
+from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.chart import BarChart, Reference
 from docx import Document
@@ -87,9 +88,9 @@ def make_excel(cid, msg):
                     if row_idx == 1: cell.fill = h_fill; cell.font = h_font
                     elif row_idx % 2 == 0: cell.fill = z_fill
 
-    for col in ws.columns:
+    for idx, col in enumerate(ws.columns, start=1):
         max_len = max((len(str(c.value or "")) for c in col), default=10)
-        ws.column_dimensions[col.column_letter].width = min(max_len + 6, 45)
+        ws.column_dimensions[get_column_letter(idx)].width = min(max_len + 6, 45)
 
     if row_idx > 2 and ws.max_column >= 2:
         try:

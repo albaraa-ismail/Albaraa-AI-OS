@@ -6,7 +6,7 @@ from core_ai import sb, ai_ask, send_msg, send_file
 from memory_engine import get_context, save_memory
 from office_tools import make_kpi, make_word, make_excel, make_pptx
 from video_studio import make_video
-from evolution_engine import manage_agents, backup_system
+from evolution_engine import manage_agents, export_full_backup
 from agents.research_agent import fetch_live_knowledge
 from agents.learning_agent import QualityReviewerAgent
 from agents.builder_agent import BuilderAgent
@@ -51,7 +51,7 @@ def run_task(cid: str, msg: str, role: str, sname: str):
         return
 
     if "نسخة احتياطية" in msg or "باك اب" in m_low:
-        backup_system(cid)
+        export_full_backup(cid)
         return
 
     if any(k in msg for k in ("تقرير الأداء", "مؤشرات الأداء", "kpi")):

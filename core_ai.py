@@ -6,6 +6,12 @@ import requests
 # إعداد جلسة اتصال موحدة وسريعة لجميع الملفات
 SESSION = requests.Session()
 
+# بناء الروابط برمجياً لحمايتها من التعديل التلقائي عند النسخ
+_D_GURL = "".join(["https:/", "/api.green-api.", "com"])
+GEMINI_BASE_URL = "".join(["https:/", "/generativelanguage.googleapis.", "com/v1beta/models/"])
+_OR_URL = "".join(["https:/", "/openrouter.", "ai/api/v1/chat/completions"])
+_GROQ_URL = "".join(["https:/", "/api.groq.", "com/openai/v1/chat/completions"])
+
 # مفاتيح الاتصال المربوطة في Render
 SB_URL = os.environ.get("SUPABASE_URL", "").strip()
 SB_KEY = os.environ.get("SUPABASE_KEY", "").strip()
@@ -15,9 +21,9 @@ OR_KEY = os.environ.get("OPENROUTER_API_KEY", "").strip()
 
 G_ID = os.environ.get("GREEN_API_ID", "").strip()
 G_TOK = os.environ.get("GREEN_API_TOKEN", "").strip()
-G_URL = os.environ.get("GREEN_API_URL", "https://green-api.com").strip().rstrip("/")
-
-GEMINI_BASE_URL = "https://googleapis.com"
+G_URL = os.environ.get("GREEN_API_URL", _D_GURL).strip().rstrip("/")
+if G_URL == "https://green-api.com":
+    G_URL = _D_GURL
 
 # قاعدة الحوكمة الجديدة: منع تأليف الأرقام الوهمية والالتزام بالحقائق
 STRICT_POLICY = (
@@ -72,7 +78,6 @@ def ai_ask(prompt: str, system_prompt: str = "", temperature: float = 0.3) -> st
     # 2. المحاولة الثانية: OpenRouter (بديل سحابي موثوق)
     if OR_KEY:
         try:
-            url = "https://openrouter.ai"
             headers = {
                 "Authorization": f"Bearer {OR_KEY}",
                 "Content-Type": "application/json"
@@ -85,7 +90,7 @@ def ai_ask(prompt: str, system_prompt: str = "", temperature: float = 0.3) -> st
                 ],
                 "temperature": temperature
             }
-            r = SESSION.post(url, headers=headers, json=payload, timeout=45)
+            r = SESSION.post(_OR_URL, headers=headers, json=payload, timeout=45)
             if r.status_code == 200:
                 txt = r.json()["choices"][0]["message"]["content"].strip()
                 if txt:
@@ -96,7 +101,6 @@ def ai_ask(prompt: str, system_prompt: str = "", temperature: float = 0.3) -> st
     # 3. المحاولة الثالثة: Groq (الأسرع كخط دفاع أخير)
     if GROQ_KEY:
         try:
-            url = "https://groq.com"
             headers = {
                 "Authorization": f"Bearer {GROQ_KEY}",
                 "Content-Type": "application/json"
@@ -109,7 +113,7 @@ def ai_ask(prompt: str, system_prompt: str = "", temperature: float = 0.3) -> st
                 ],
                 "temperature": temperature
             }
-            r = SESSION.post(url, headers=headers, json=payload, timeout=30)
+            r = SESSION.post(_GROQ_URL, headers=headers, json=payload, timeout=30)
             if r.status_code == 200:
                 txt = r.json()["choices"][0]["message"]["content"].strip()
                 if txt:

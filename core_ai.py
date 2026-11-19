@@ -64,7 +64,9 @@ def ai_ask(prompt: str, system_prompt: str = "", temperature: float = 0.3) -> st
                 r = requests.post(url, json=payload, timeout=20)
                 if r.status_code == 200:
                     data = r.json()
-                    txt = data["candidates"]["content"]["parts"]["text"].strip()
+                    cand = next(iter(data.get("candidates") or []), {})
+                    part = next(iter(cand.get("content", {}).get("parts") or []), {})
+                    txt = part.get("text", "").strip()
                     if txt:
                         return txt
                 else:
@@ -83,7 +85,8 @@ def ai_ask(prompt: str, system_prompt: str = "", temperature: float = 0.3) -> st
                 }
                 r = requests.post(_GROQ_URL, headers=headers, json=payload, timeout=25)
                 if r.status_code == 200:
-                    txt = r.json()["choices"]["message"]["content"].strip()
+                    choice = next(iter(r.json().get("choices") or []), {})
+                    txt = choice.get("message", {}).get("content", "").strip()
                     if txt:
                         return txt
                 else:
@@ -102,7 +105,8 @@ def ai_ask(prompt: str, system_prompt: str = "", temperature: float = 0.3) -> st
                 }
                 r = requests.post(_OR_URL, headers=headers, json=payload, timeout=35)
                 if r.status_code == 200:
-                    txt = r.json()["choices"]["message"]["content"].strip()
+                    choice = next(iter(r.json().get("choices") or []), {})
+                    txt = choice.get("message", {}).get("content", "").strip()
                     if txt:
                         return txt
                 else:

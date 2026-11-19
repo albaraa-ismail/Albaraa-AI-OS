@@ -11,6 +11,10 @@ from safe_guard import safe_run
 app = Flask(__name__)
 SEEN = set()
 
+_TW_CDN = "".join(["https:/", "/cdn.tailwindcss.", "com"])
+_CH_CDN = "".join(["https:/", "/cdn.jsdelivr.", "net/npm/chart.js"])
+_GF_CDN = "".join(["https:/", "/fonts.googleapis.", "com/css2?family=Cairo:wght@400;600;700&display=swap"])
+
 @app.route("/board/<int:bid>", methods=["GET", "POST"])
 def live_board(bid):
     res = sb("GET", "self_learning_logs", q=f"?id=eq.{bid}")
@@ -84,9 +88,9 @@ def live_board(bid):
 
     html = f"""<!DOCTYPE html><html dir='rtl' lang='ar'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
     <title>{board.get('title','لوحة التحكم')}</title>
-    <script src='https://tailwindcss.com'></script>
-    <script src='https://jsdelivr.net'></script>
-    <link href='https://googleapis.com' rel='stylesheet'>
+    <script src='{_TW_CDN}'></script>
+    <script src='{_CH_CDN}'></script>
+    <link href='{_GF_CDN}' rel='stylesheet'>
     <style>body{{font-family:'Cairo',sans-serif;background:#0b1120;color:#f8fafc}}</style></head>
     <body class='p-4 md:p-8 max-w-7xl mx-auto'>
       <div class='flex flex-wrap justify-between items-center gap-4 mb-6 bg-slate-900/90 border border-slate-800 p-5 rounded-2xl shadow-xl'>
@@ -96,7 +100,6 @@ def live_board(bid):
         </div>
         <a href='/board/{bid}/export' class='bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-2.5 rounded-xl text-sm shadow transition'>📥 تصدير Excel احترافي</a>
       </div>
-
       <div class='grid grid-cols-1 md:grid-cols-3 gap-4 mb-6'>
         <div class='bg-slate-900 border border-slate-800 p-5 rounded-2xl'><p class='text-slate-400 text-xs'>إجمالي السجلات</p><p class='text-3xl font-bold text-sky-400 mt-1'>{len(rows)}</p></div>
         <div class='bg-slate-900 border border-slate-800 p-5 rounded-2xl'><p class='text-slate-400 text-xs'>متوسط المؤشر الرقمي</p><p class='text-3xl font-bold text-emerald-400 mt-1'>{avg_val}</p></div>
@@ -167,3 +170,10 @@ def webhook():
     txt = (mdata.get("textMessageData", {}).get("textMessage") or mdata.get("extendedTextMessageData", {}).get("text") or "").strip()
     cid = data.get("senderData", {}).get("chatId", "")
     sname = data.get("senderData", {}).get("senderName", "User")
+    if txt and cid and not any(txt.startswith(p) for p in ("🔍", "⚙️", "🛡️", "📑", "🌐", "🚀", "💻", "⚠", "✅", "🤖")):
+        print(f"IN: {data.get('typeWebhook')} | CID: {cid} | MSG: {txt[:20]}", flush=True)
+        threading.Thread(target=safe_run, args=(run_task, cid, txt, "admin", sname), daemon=True).start()
+    return jsonify({"status": "ok"}), 200
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))

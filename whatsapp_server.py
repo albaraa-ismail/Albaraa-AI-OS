@@ -31,12 +31,14 @@ FULL_DASHBOARD_HTML = """
   .card { background: #1e293b; padding: 18px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #334155; overflow-x: auto; }
   .section { display: none; }
   .section.active { display: block; }
-  table { width: 100%; border-collapse: collapse; margin-top: 10px; min-width: 500px; }
-  th, td { border: 1px solid #334155; padding: 10px; text-align: right; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; min-width: 520px; }
+  th, td { border: 1px solid #334155; padding: 10px; text-align: right; vertical-align: top; }
   th { background: #0f172a; color: #94a3b8; }
-  input, textarea { width: 95%; background: #0f172a; color: #fff; border: 1px solid #475569; padding: 8px; border-radius: 6px; margin-bottom: 8px; }
-  .btn { background: #10b981; color: #fff; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-weight: bold; }
+  input, textarea { width: 95%; background: #0f172a; color: #fff; border: 1px solid #475569; padding: 8px; border-radius: 6px; margin-bottom: 6px; }
+  .btn { background: #10b981; color: #fff; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-weight: bold; margin: 2px; }
+  .btn-warn { background: #f59e0b; }
   .btn-del { background: #ef4444; }
+  .badge { padding: 3px 8px; border-radius: 5px; font-size: 12px; background: #334155; display: inline-block; margin-bottom: 5px; }
 </style>
 <script>
   function showTab(tabId, btn) {
@@ -55,40 +57,48 @@ FULL_DASHBOARD_HTML = """
 </div>
 
 <div class="stats">
-  <div class="stat-box"><div class="stat-num">{{ agents|length }}</div><div>الوكلاء النشطون</div></div>
+  <div class="stat-box"><div class="stat-num">{{ active_count }}</div><div>الوكلاء النشطون</div></div>
   <div class="stat-box"><div class="stat-num">{{ kpis|length }}</div><div>المهام المنفذة</div></div>
   <div class="stat-box"><div class="stat-num">{{ avg_sec }} ث</div><div>متوسط الاستجابة</div></div>
   <div class="stat-box"><div class="stat-num">{{ total_saved }} د</div><div>الوقت الموفّر</div></div>
 </div>
 
 <div class="tabs">
-  <button class="tab-btn active" onclick="showTab('agents-tab', this)">🤖 الوكلاء (تعديل/إضافة)</button>
-  <button class="tab-btn" onclick="showTab('reminders-tab', this)">⏰ التذكيرات والمهام</button>
+  <button class="tab-btn active" onclick="showTab('agents-tab', this)">🤖 الوكلاء والأقسام</button>
+  <button class="tab-btn" onclick="showTab('reminders-tab', this)">⏰ التذكيرات النشطة</button>
   <button class="tab-btn" onclick="showTab('kpis-tab', this)">📈 سجل الأداء المباشر</button>
 </div>
 
 <div id="agents-tab" class="section active">
   <div class="card">
-    <h3>➕ إضافة وكيل جديد فوراً</h3>
+    <h3>➕ إضافة قسم / وكيل جديد وتفعيله فوراً</h3>
     <form method="POST">
       <input type="hidden" name="action" value="add_agent">
-      <input type="text" name="agent_name" placeholder="اسم الوكيل الجديد (مثلاً: خبير التسويق)" required>
-      <textarea name="system_prompt" rows="2" placeholder="اكتب تعليمات الوكيل ودوره بدقة..." required></textarea>
+      <input type="text" name="agent_name" placeholder="اسم الوكيل الجديد (مثلاً: خبير التسويق الرقمي)" required>
+      <textarea name="system_prompt" rows="2" placeholder="اكتب مهام وصلاحيات الوكيل بدقة..." required></textarea>
       <button type="submit" class="btn">إضافة وتفعيل الوكيل</button>
     </form>
   </div>
   <div class="card">
-    <h3>✏️ تعديل الوكلاء الحاليين</h3>
+    <h3>✏️ إدارة وتعديل الوكلاء</h3>
     <table>
-      <tr><th>اسم الوكيل</th><th>التعليمات (System Prompt)</th><th>تحكم</th></tr>
+      <tr><th>الوكيل والحالة</th><th>التعليمات (System Prompt)</th><th>تحكم</th></tr>
       {% for ag in agents %}
       <tr>
         <form method="POST">
-          <input type="hidden" name="action" value="edit_agent">
           <input type="hidden" name="id" value="{{ ag.id }}">
-          <td><input type="text" name="agent_name" value="{{ ag.agent_name }}"></td>
-          <td><textarea name="system_prompt" rows="2">{{ ag.system_prompt }}</textarea></td>
-          <td><button type="submit" class="btn">حفظ</button></td>
+          <td>
+            <span class="badge">{{ ag.unit_name }}</span>
+            <input type="text" name="agent_name" value="{{ ag.agent_name }}">
+          </td>
+          <td><textarea name="system_prompt" rows="3">{{ ag.system_prompt }}</textarea></td>
+          <td>
+            <button type="submit" name="action" value="edit_agent" class="btn">حفظ</button>
+            {% if ag.unit_name == 'قيد_الاعتماد' %}
+            <button type="submit" name="action" value="approve_agent" class="btn btn-warn">اعتماد</button>
+            {% endif %}
+            <button type="submit" name="action" value="del_agent" class="btn btn-del">حذف</button>
+          </td>
         </form>
       </tr>
       {% endfor %}
@@ -98,18 +108,19 @@ FULL_DASHBOARD_HTML = """
 
 <div id="reminders-tab" class="section">
   <div class="card">
-    <h3>⏰ التذكيرات والمواعيد المسجلة</h3>
+    <h3>⏰ التذكيرات النشطة المسجلة</h3>
     <table>
-      <tr><th>التذكير / المهمة</th><th>الوقت / الحالة</th><th>إجراء</th></tr>
+      <tr><th>موعد التنبيه</th><th>نص التذكير</th><th>إجراء</th></tr>
       {% for rem in reminders %}
+      {% set parts = (rem.lesson_learned or '|').split('|', 1) %}
       <tr>
-        <td>{{ rem.reminder_text or rem.task or rem.content or 'مهمة مسجلة' }}</td>
-        <td>{{ rem.remind_at or rem.status or 'نشط' }}</td>
+        <td>{{ parts[0] }}</td>
+        <td>{{ parts[1] if parts|length > 1 else rem.lesson_learned }}</td>
         <td>
           <form method="POST" style="margin:0;">
             <input type="hidden" name="action" value="del_reminder">
             <input type="hidden" name="id" value="{{ rem.id }}">
-            <button type="submit" class="btn btn-del">حذف</button>
+            <button type="submit" class="btn btn-del">إلغاء وحذف</button>
           </form>
         </td>
       </tr>
@@ -142,30 +153,38 @@ FULL_DASHBOARD_HTML = """
 def live_dashboard(cid):
     if request.method == "POST":
         act = request.form.get("action")
+        item_id = request.form.get("id")
         if act == "edit_agent":
             sb("PATCH", "agents_registry", {
                 "agent_name": request.form.get("agent_name"),
                 "system_prompt": request.form.get("system_prompt")
-            }, q=f"?id=eq.{request.form.get('id')}")
+            }, q=f"?id=eq.{item_id}")
+        elif act == "approve_agent":
+            sb("PATCH", "agents_registry", {"unit_name": "قسم_معتمد_نشط"}, q=f"?id=eq.{item_id}")
+        elif act == "del_agent":
+            sb("PATCH", "agents_registry", {"unit_name": "محذوف"}, q=f"?id=eq.{item_id}")
         elif act == "add_agent":
             sb("POST", "agents_registry", {
                 "unit_name": "قسم_معتمد_نشط",
                 "agent_name": request.form.get("agent_name"),
+                "sub_agents": "Admin Dashboard",
                 "system_prompt": request.form.get("system_prompt")
             })
         elif act == "del_reminder":
-            sb("DELETE", "reminders", q=f"?id=eq.{request.form.get('id')}")
+            sb("DELETE", "self_learning_logs", q=f"?id=eq.{item_id}")
 
-    agents = sb("GET", "agents_registry", q="?order=id.desc&limit=30") or []
+    agents = sb("GET", "agents_registry", q="?unit_name=neq.محذوف&order=id.desc&limit=30") or []
+    active_count = sum(1 for a in agents if a.get("unit_name") == "قسم_معتمد_نشط")
     kpis = sb("GET", "telemetry_kpis", q="?order=id.desc&limit=20") or []
-    reminders = sb("GET", "reminders", q=f"?user_id=eq.{cid}&order=id.desc&limit=20") or []
+    reminders = sb("GET", "self_learning_logs", q=f"?user_role=eq.{cid}&task_type=eq.تذكير_نشط&order=id.desc&limit=20") or []
 
     avg_sec = round(sum(float(x.get("response_time_sec", 0)) for x in kpis) / len(kpis), 1) if kpis else 0
     total_saved = sum(int(x.get("time_saved_min", 0)) for x in kpis)
 
     return render_template_string(
         FULL_DASHBOARD_HTML,
-        agents=agents, kpis=kpis, reminders=reminders,
+        agents=agents, active_count=active_count,
+        kpis=kpis, reminders=reminders,
         avg_sec=avg_sec, total_saved=total_saved
     )
 

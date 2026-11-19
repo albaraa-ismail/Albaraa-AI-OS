@@ -94,7 +94,6 @@ def make_excel(cid, msg):
     brd = Border(left=Side(style='thin', color='CBD5E1'), right=Side(style='thin', color='CBD5E1'), top=Side(style='thin', color='CBD5E1'), bottom=Side(style='thin', color='CBD5E1'))
     aln_c = Alignment(horizontal="center", vertical="center", wrap_text=True)
     aln_r = Alignment(horizontal="right", vertical="center", wrap_text=True)
-
     parsed = []
     for l in raw.split("\n"):
         if "|" in l and not set(l.replace("|", "").strip()).issubset({"-", ":", " "}):
@@ -150,15 +149,6 @@ def make_excel(cid, msg):
     ws_dash.merge_cells("B2:M3"); ws_dash["B2"] = f"لوحة القيادة التنفيذية: {title}"; ws_dash["B2"].fill = f_navy; ws_dash["B2"].font = Font(color="FFD166", size=18, bold=True); ws_dash["B2"].alignment = aln_c
     ws_dash.merge_cells("B4:M4"); ws_dash["B4"] = f"تاريخ الإصدار: {today_dates()}  |  بطاقة الأداء المتوازن والمؤشرات التشغيلية"; ws_dash["B4"].fill = f_slate; ws_dash["B4"].font = Font(color="FFFFFF", size=11); ws_dash["B4"].alignment = aln_c
 
-def make_pptx(cid, msg):
-    import json
-    from pptx import Presentation
-    from pptx.util import Inches, Pt
-    from pptx.dml.color import RGBColor
-    from pptx.enum.text import PP_ALIGN
-
-    send_msg(cid, "📊 *تفعيل استوديو العروض التقديمية:* جاري تصميم الشرائح وتنسيق الهوية البصرية...")
-    title = _clean_title(msg)
     cards = [("B", "D", "إجمالي الأداء المحقق", f"{round(sum_ac, 1)}", "1E3A8A"), ("E", "G", "متوسط نسبة الإنجاز", f"{avg_pct}%", "0F766E"), ("H", "J", "الفارق عن المستهدف", f"{'+' if tot_diff > 0 else ''}{tot_diff}", "B45309"), ("K", "M", "نسبة المحققين للمعيار", f"{round((pass_cnt/cnt)*100)}%", "4338CA")]
     ws_dash.row_dimensions.height = 26; ws_dash.row_dimensions.height = 40
     for cs, ce, tk, fk, hx in cards:
@@ -199,6 +189,15 @@ def make_pptx(cid, msg):
     for f in (path, chart_img):
         if os.path.exists(f): os.remove(f)
     del wb; gc.collect()
+def make_pptx(cid, msg):
+    import json
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN
+
+    send_msg(cid, "📊 *تفعيل استوديو العروض التقديمية:* جاري تصميم الشرائح وتنسيق الهوية البصرية...")
+    title = _clean_title(msg)
 
     prompt = (
         f"أنت خبير تصميم عروض تقديمية تنفيذية. أنشئ محتوى عرض تقديمي احترافي حول: {msg}\n"
@@ -270,7 +269,6 @@ def make_pptx(cid, msg):
     p_dt.font.size = Pt(14)
     p_dt.font.color.rgb = RGBColor(148, 163, 184)
     p_dt.space_before = Pt(28)
-
     for idx, sl in enumerate(data.get("slides", [])[:8], 1):
         slide = prs.slides.add_slide(blank_layout)
         bg = slide.background.fill

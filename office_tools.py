@@ -1,4 +1,4 @@
-import os, gc, pendulum
+وهناimport os, gc, pendulum
 from hijridate import Gregorian
 from core_ai import sb, ai_ask, send_msg, send_file
 
@@ -188,3 +188,145 @@ def make_excel(cid, msg):
     for f in (path, chart_img):
         if os.path.exists(f): os.remove(f)
     del wb; gc.collect()
+def make_pptx(cid, msg):
+    import json
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN
+
+    send_msg(cid, "📊 *تفعيل استوديو العروض التقديمية:* جاري تصميم الشرائح وتنسيق الهوية البصرية...")
+    title = _clean_title(msg)
+
+    prompt = (
+        f"أنت خبير تصميم عروض تقديمية تنفيذية. أنشئ محتوى عرض تقديمي احترافي حول: {msg}\n"
+        "يجب أن يكون الرد بصيغة JSON صالحة فقط بدون أي نص إضافي أو علامات markdown، بالهيكل التالي تماماً:\n"
+        '{"subtitle": "وصف مختصر جذاب للعرض", "slides": [{"heading": "عنوان الشريحة", "points": ["نقطة رئيسية واضحة ومفيدة", "نقطة ثانية", "نقطة ثالثة", "نقطة رابعة"]}]}\n'
+        "أنشئ 6 شرائح متنوعة وشاملة باللغة العربية الفصحى."
+    )
+
+    raw = ai_ask(msg, prompt).replace("```json", "").replace("```", "").strip()
+    try:
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        data = json.loads(raw[start:end])
+    except Exception:
+        data = {
+            "subtitle": "عرض تحليلي واستراتيجي شامل",
+            "slides": [
+                {"heading": "نظرة عامة وأهداف العرض", "points": ["تحديد الرؤية والأهداف الاستراتيجية", "تحليل الوضع الراهن والفرص المتاحة", "رفع كفاءة الأداء وجودة المخرجات"]},
+                {"heading": "المحاور الرئيسية للتنفيذ", "points": ["التخطيط المنهجي وتوزيع المهام", "توظيف التقنيات الحديثة والأتمتة", "المتابعة المستمرة وقياس الأثر"]},
+                {"heading": "التوصيات والخطوات القادمة", "points": ["البدء الفوري بالمرحلة الأولى", "مراجعة مؤشرات الأداء بشكل دوري", "تطوير المبادرات بناءً على النتائج"]}
+            ]
+        }
+
+    prs = Presentation()
+    prs.slide_width = Inches(13.333)
+    prs.slide_height = Inches(7.5)
+    blank_layout = prs.slide_layouts[6]
+
+    NAVY = RGBColor(11, 25, 44)      # #0B192C
+    SLATE = RGBColor(30, 62, 98)     # #1E3E62
+    GOLD = RGBColor(255, 209, 102)   # #FFD166
+    WHITE = RGBColor(255, 255, 255)
+    LIGHT_BG = RGBColor(248, 250, 252)
+    DARK_TXT = RGBColor(15, 23, 42)
+
+    # 1. شريحة الغلاف
+    s0 = prs.slides.add_slide(blank_layout)
+    bg0 = s0.background.fill
+    bg0.solid()
+    bg0.fore_color.rgb = NAVY
+
+    bar = s0.shapes.add_shape(1, Inches(0), Inches(6.8), Inches(13.333), Inches(0.2))
+    bar.fill.solid()
+    bar.fill.fore_color.rgb = GOLD
+    bar.line.fill.background()
+
+    tb = s0.shapes.add_textbox(Inches(1), Inches(2.2), Inches(11.333), Inches(2))
+    tf = tb.text_frame
+    tf.word_wrap = True
+    p = tf.paragraphs[0]
+    p.text = title
+    p.alignment = PP_ALIGN.RIGHT
+    p.font.name = "Arial"
+    p.font.size = Pt(40)
+    p.font.bold = True
+    p.font.color.rgb = GOLD
+
+    p_sub = tf.add_paragraph()
+    p_sub.text = data.get("subtitle", "")
+    p_sub.alignment = PP_ALIGN.RIGHT
+    p_sub.font.name = "Arial"
+    p_sub.font.size = Pt(20)
+    p_sub.font.color.rgb = WHITE
+    p_sub.space_before = Pt(14)
+
+    p_dt = tf.add_paragraph()
+    p_dt.text = f"تاريخ الإصدار: {today_dates()} | Albaraa AI OS"
+    p_dt.alignment = PP_ALIGN.RIGHT
+    p_dt.font.name = "Arial"
+    p_dt.font.size = Pt(14)
+    p_dt.font.color.rgb = RGBColor(148, 163, 184)
+    p_dt.space_before = Pt(28)
+
+    # 2. شرائح المحتوى
+    for idx, sl in enumerate(data.get("slides", [])[:8], 1):
+        slide = prs.slides.add_slide(blank_layout)
+        bg = slide.background.fill
+        bg.solid()
+        bg.fore_color.rgb = LIGHT_BG
+
+        hdr = slide.shapes.add_shape(1, Inches(0), Inches(0), Inches(13.333), Inches(1.2))
+        hdr.fill.solid()
+        hdr.fill.fore_color.rgb = NAVY
+        hdr.line.fill.background()
+
+        accent = slide.shapes.add_shape(1, Inches(0), Inches(1.2), Inches(13.333), Inches(0.08))
+        accent.fill.solid()
+        accent.fill.fore_color.rgb = GOLD
+        accent.line.fill.background()
+
+        htb = slide.shapes.add_textbox(Inches(0.8), Inches(0.25), Inches(11.7), Inches(0.7))
+        htf = htb.text_frame
+        hp = htf.paragraphs[0]
+        hp.text = f"{idx}. {sl.get('heading', '')}"
+        hp.alignment = PP_ALIGN.RIGHT
+        hp.font.name = "Arial"
+        hp.font.size = Pt(26)
+        hp.font.bold = True
+        hp.font.color.rgb = GOLD
+
+        btb = slide.shapes.add_textbox(Inches(1.0), Inches(1.8), Inches(11.3), Inches(4.8))
+        btf = btb.text_frame
+        btf.word_wrap = True
+        for p_i, pt_text in enumerate(sl.get("points", [])):
+            bp = btf.paragraphs[0] if p_i == 0 else btf.add_paragraph()
+            bp.text = f"▪ {pt_text}"
+            bp.alignment = PP_ALIGN.RIGHT
+            bp.font.name = "Arial"
+            bp.font.size = Pt(20)
+            bp.font.color.rgb = DARK_TXT
+            bp.space_after = Pt(16)
+
+        ftb = slide.shapes.add_textbox(Inches(0.8), Inches(6.9), Inches(11.7), Inches(0.4))
+        fp = ftb.text_frame.paragraphs[0]
+        fp.text = f"{title}  |  شريحة {idx}"
+        fp.alignment = PP_ALIGN.LEFT
+        fp.font.name = "Arial"
+        fp.font.size = Pt(11)
+        fp.font.color.rgb = SLATE
+
+    path = "/tmp/Presentation.pptx"
+    prs.save(path)
+    send_file(
+        cid,
+        path,
+        "Executive_Presentation.pptx",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        f"📽️ تم تصميم العرض التقديمي الاحترافي: *{title}*"
+    )
+    if os.path.exists(path):
+        os.remove(path)
+    del prs
+    gc.collect()

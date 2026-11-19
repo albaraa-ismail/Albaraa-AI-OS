@@ -6,7 +6,7 @@ from core_ai import sb, ai_ask, send_msg, send_file
 from memory_engine import get_context, save_memory
 from office_tools import make_kpi, make_word, make_excel, make_pptx
 from video_studio import make_video
-from evolution_engine import register_agent_cmd, backup_system
+from evolution_engine import manage_agents, backup_system
 from agents.research_agent import fetch_live_knowledge
 from agents.learning_agent import QualityReviewerAgent
 from agents.builder_agent import BuilderAgent
@@ -14,13 +14,6 @@ from agents.builder_agent import BuilderAgent
 HOST_URL = "".join(["https:/", "/albaraa-ai-os.", "onrender.", "com"])
 
 def _real_multi_agent_pipeline(cid: str, msg: str, ctx: str, agents_list: list) -> str:
-    """
-    تشغيل سلسلة الوكلاء الحقيقيين بالتسلسل:
-    1. وكيل البحث: يجلب حقائق حقيقية من الإنترنت.
-    2. وكيل التنفيذ والتخطيط: يصيغ المخرج بناءً على الحقائق والسياق.
-    3. وكيل الجودة (QualityReviewerAgent): يدقق الأرقام ويمنع الهلوسة والتضارب.
-    """
-    # المرحلة 1: البحث الحي في الإنترنت
     send_msg(cid, "🔍 *المرحلة 1/3 (وكيل البحث):* جاري البحث عن بيانات ومصادر حقيقية...")
     web_facts = ""
     try:
@@ -28,7 +21,6 @@ def _real_multi_agent_pipeline(cid: str, msg: str, ctx: str, agents_list: list) 
     except Exception as e:
         print("Research Agent Err:", e, flush=True)
 
-    # المرحلة 2: التنفيذ والتخطيط عبر فريق الوكلاء المسجلين في Supabase
     send_msg(cid, "⚙️ *المرحلة 2/3 (وكلاء التخطيط والتنفيذ):* جاري تحليل المعطيات وصياغة المخرج...")
     team_roles = "\n".join([f"- {a.get('agent_name')}: {a.get('role_description')}" for a in agents_list]) or "- فريق وكلاء التخطيط والتحليل"
     
@@ -44,7 +36,6 @@ def _real_multi_agent_pipeline(cid: str, msg: str, ctx: str, agents_list: list) 
     )
     draft_output = ai_ask(draft_prompt, sys_exec, temperature=0.2)
 
-    # المرحلة 3: المراجعة والتدقيق قبل الاعتماد
     send_msg(cid, "🛡️ *المرحلة 3/3 (وكيل الجودة والحوكمة):* جاري تدقيق الأرقام ومراجعة الاتساق...")
     reviewer = QualityReviewerAgent(llm_callable=lambda p: ai_ask(p, "أنت مدقق جودة صارم تمنع التضارب والأرقام الوهمية.", temperature=0.1))
     final_output = reviewer.review_and_improve(draft_output)
@@ -54,9 +45,8 @@ def run_task(cid: str, msg: str, role: str, sname: str):
     t0 = time.time()
     m_low = msg.strip().lower()
 
-    # 1. أوامر الإدارة والتطوير الذاتي للوكلاء
     if any(k in msg for k in ("أضف وكيل", "اضف وكيل", "انشئ وكيل", "أنشئ وكيل", "قائمة الوكلاء", "الوكلاء النشطين")):
-        res = register_agent_cmd(msg)
+        res = manage_agents(msg)
         send_msg(cid, res)
         return
 
@@ -64,7 +54,6 @@ def run_task(cid: str, msg: str, role: str, sname: str):
         backup_system(cid)
         return
 
-    # 2. أوامر استخراج المخرجات والملفات الفعلية
     if any(k in msg for k in ("تقرير الأداء", "مؤشرات الأداء", "kpi")):
         make_kpi(cid)
         return
@@ -85,7 +74,6 @@ def run_task(cid: str, msg: str, role: str, sname: str):
         make_video(cid, msg)
         return
 
-    # 3. أوامر البرمجة وبناء الأكواد الفعلية عبر BuilderAgent
     if any(k in msg for k in ("اكتب كود", "برمج", "سكربت", "script", "python")):
         send_msg(cid, "💻 *وكيل التطوير البرمجي:* جاري كتابة الكود وفحصه وتجهيز الملف...")
         builder = BuilderAgent()
@@ -99,7 +87,6 @@ def run_task(cid: str, msg: str, role: str, sname: str):
             send_msg(cid, f"⚠ {res.get('message', 'تعذر توليد الكود')}")
         return
 
-    # 4. إنشاء لوحة تحكم ويب حية وتفاعلية
     if "لوحة حية" in msg or "رابط لوحة" in msg:
         send_msg(cid, "🌐 جاري هندسة لوحة التحكم الحية وربطها بقاعدة البيانات...")
         p_board = (
@@ -111,20 +98,18 @@ def run_task(cid: str, msg: str, role: str, sname: str):
             s_i, e_i = raw_b.find("{"), raw_b.rfind("}") + 1
             board_obj = json.loads(raw_b[s_i:e_i])
             saved = sb("POST", "self_learning_logs", {"user_role": cid, "task_type": "live_board", "lesson_learned": json.dumps(board_obj, ensure_ascii=False)})
-            bid = saved["id"] if saved else 1
+            bid = saved[0]["id"] if saved else 1
             send_msg(cid, f"🚀 *تم إطلاق لوحة التحكم الحية بنجاح!*\n🔗 الرابط المباشر:\n{HOST_URL}/board/{bid}")
         except Exception as e:
             send_msg(cid, f"⚠ تعذر إنشاء اللوحة الحية: {e}")
         return
 
-    # 5. التنفيذ الفعلي عبر منظومة الوكلاء المتعاونين (بحث -> بناء -> مراجعة)
     ctx = get_context(cid)
     agents_list = sb("GET", "agents_registry", q="?status=eq.active") or []
     
     final_ans = _real_multi_agent_pipeline(cid, msg, ctx, agents_list)
     send_msg(cid, f"📑 *مخرج منظومة الوكلاء المعتمد:*\n━━━━━━━━━━\n{final_ans}")
 
-    # حفظ الذاكرة وتسجيل مؤشر الأداء
     save_memory(cid, role, sname, msg, final_ans)
     dur = round(time.time() - t0, 2)
     sb("POST", "telemetry_kpis", {

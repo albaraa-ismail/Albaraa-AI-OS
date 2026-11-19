@@ -1,12 +1,5 @@
-import os, openpyxl, pendulum
+import os, gc, pendulum
 from hijridate import Gregorian
-from openpyxl.utils import get_column_letter
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.chart import BarChart, Reference
-from docx import Document
-from docx.shared import Pt as DocPt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml import OxmlElement
 from core_ai import sb, ai_ask, send_msg, send_file
 
 def today_dates():
@@ -15,11 +8,14 @@ def today_dates():
     return f"{hijri.day}/{hijri.month}/{hijri.year}هـ - {now.format('YYYY/MM/DD')}م"
 
 def _set_rtl(p):
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
     p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     pPr = p._p.get_or_add_pPr()
     pPr.append(OxmlElement('w:bidi'))
 
 def make_kpi(cid):
+    import openpyxl
     wb = openpyxl.Workbook(); ws = wb.active; ws.sheet_view.rightToLeft = True
     ws.append(["رقم العملية", "المستخدم", "القسم", "زمن التنفيذ(ث)", "الوقت الموفر(د)", "مؤشر التطور%", "المخرج"])
     for i in sb("GET", "telemetry_kpis", q="?order=id.desc&limit=50"):
@@ -28,8 +24,11 @@ def make_kpi(cid):
     wb.save(path)
     send_file(cid, path, "Performance_Report.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"📊 تقرير قياس الأداء ({today_dates()})")
     if os.path.exists(path): os.remove(path)
+    del wb; gc.collect()
 
 def make_word(cid, msg):
+    from docx import Document
+    from docx.shared import Pt as DocPt
     send_msg(cid, "👥 *تفعيل غرفة عمليات الوثائق:*\n1️⃣ وكيل التخطيط يبني الهيكل...\n2️⃣ وكيل التحرير يصيغ المحاور...\n3️⃣ وكيل التدقيق يراجع الجودة...")
     outline = ai_ask(msg, "ضع خطة هيكلية احترافية من 5 محاور رئيسية لتغطية هذا الموضوع بعمق أكاديمي وتنفيذي. اكتب كل محور في سطر مستقل بدون مقدمات:")
     sections = [s.strip().lstrip("-*#1234567890. ") for s in outline.split("\n") if len(s.strip()) > 3][:5]
@@ -58,8 +57,14 @@ def make_word(cid, msg):
     doc.save(path)
     send_file(cid, path, "Executive_Document.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "📄 تم إعداد المستند الاحترافي بنجاح\n💡 هل تود تحويل هذا المستند إلى عرض تقديمي أو ملخص تنفيذي؟")
     if os.path.exists(path): os.remove(path)
+    del doc; gc.collect()
 
 def make_excel(cid, msg):
+    import openpyxl
+    from openpyxl.utils import get_column_letter
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.chart import BarChart, Reference
+
     send_msg(cid, "👥 *تفعيل غرفة عمليات البيانات:*\n1️⃣ وكيل التحليل يبني الجداول...\n2️⃣ وكيل القياس يولد الرسم البياني...")
     raw = ai_ask(msg, "أنشئ جدول بيانات احترافي من 12 صفاً و 5 أعمدة (اجعل العمود الأول نصي والعمود الثاني رقمي ليصلح للرسم البياني). افصل بين الأعمدة بعلامة | فقط بدون أي نص إضافي أو خطوط فصل:")
     wb = openpyxl.Workbook(); ws = wb.active; ws.sheet_view.rightToLeft = True
@@ -104,3 +109,4 @@ def make_excel(cid, msg):
     wb.save(path)
     send_file(cid, path, "Analytics_Report.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "📊 ملف Excel جاهز ومزود برسم بياني\n💡 هل تود عرض هذه النتائج في شرائح PowerPoint؟")
     if os.path.exists(path): os.remove(path)
+    del wb; gc.collect()

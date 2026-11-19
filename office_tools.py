@@ -65,48 +65,132 @@ def make_excel(cid, msg):
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.chart import BarChart, Reference
 
-    send_msg(cid, "👥 *تفعيل غرفة عمليات البيانات:*\n1️⃣ وكيل التحليل يبني الجداول...\n2️⃣ وكيل القياس يولد الرسم البياني...")
-    raw = ai_ask(msg, "أنشئ جدول بيانات احترافي من 12 صفاً و 5 أعمدة (اجعل العمود الأول نصي والعمود الثاني رقمي ليصلح للرسم البياني). افصل بين الأعمدة بعلامة | فقط بدون أي نص إضافي أو خطوط فصل:")
-    wb = openpyxl.Workbook(); ws = wb.active; ws.sheet_view.rightToLeft = True
-    ws.title = "التحليل والبيانات"
-    h_fill = PatternFill(start_color="1B365D", end_color="1B365D", fill_type="solid")
-    z_fill = PatternFill(start_color="F4F7FA", end_color="F4F7FA", fill_type="solid")
-    h_font = Font(color="FFFFFF", bold=True, size=12)
-    border = Border(left=Side(style='thin', color='D9D9D9'), right=Side(style='thin', color='D9D9D9'), top=Side(style='thin', color='D9D9D9'), bottom=Side(style='thin', color='D9D9D9'))
+    send_msg(cid, "👥 *تفعيل غرفة عمليات لوحة البيانات:*\n1️⃣ وكيل التحليل يبني البيانات الواقعية...\n2️⃣ وكيل المؤشرات يركّب المعادلات والرسوم...")
+    prompt_excel = (
+        "أنشئ جدول بيانات تنفيذي واقعي وغني بالتفاصيل مكون من 16 صفاً (صف العناوين + 15 صف بيانات حقيقية) و 6 أعمدة بالضبط:\n"
+        "العمود 1: اسم البند أو الموظف أو القسم (نص)\n"
+        "العمود 2: التصنيف أو الإدارة (نص)\n"
+        "العمود 3: القيمة المحققة أو النقاط (رقم صحيح فقط بدون رموز)\n"
+        "العمود 4: المستهدف المطلوب (رقم صحيح فقط بدون رموز)\n"
+        "العمود 5: نسبة الإنجاز % (رقم صحيح من 60 إلى 100 فقط بدون علامة %)\n"
+        "العمود 6: الحالة التنفيذية (ممتاز / جيد جداً / يحتاج تحسين)\n"
+        "افصل بين الأعمدة بعلامة | فقط بدون أي مقدمات أو شروحات أو خطوط فصل."
+    )
+    raw = ai_ask(msg, prompt_excel)
 
-    row_idx = 0
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.sheet_view.rightToLeft = True
+    ws.sheet_view.showGridLines = True
+    ws.title = "لوحة التحكم التنفيذية"
+
+    navy = PatternFill(start_color="0F1C2E", end_color="0F1C2E", fill_type="solid")
+    blue_hdr = PatternFill(start_color="1B365D", end_color="1B365D", fill_type="solid")
+    card_bg = PatternFill(start_color="EBF3FA", end_color="EBF3FA", fill_type="solid")
+    zebra = PatternFill(start_color="F7FAFC", end_color="F7FAFC", fill_type="solid")
+    green_bg = PatternFill(start_color="D4EDDA", end_color="D4EDDA", fill_type="solid")
+    amber_bg = PatternFill(start_color="FFF3CD", end_color="FFF3CD", fill_type="solid")
+
+    thin_side = Side(style='thin', color='CBD5E1')
+    border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+
+    ws.merge_cells("A1:F1")
+    ws["A1"] = f"📊 لوحة التحكم التحليلية: {msg[:55]}"
+    ws["A1"].font = Font(color="FFD166", bold=True, size=15)
+    ws["A1"].fill = navy
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 36
+
+    ws.merge_cells("A2:F2")
+    ws["A2"] = f"تاريخ التحديث: {today_dates()}  |  نموذج التحليل التنفيذي الآلي"
+    ws["A2"].font = Font(color="FFFFFF", size=10)
+    ws["A2"].fill = blue_hdr
+    ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[2].height = 22
+
+    parsed_rows = []
     for l in raw.split("\n"):
         if "|" in l and not set(l.replace("|", "").strip()).issubset({"-", ":", " "}):
             cells = []
             for x in l.split("|"):
-                val = x.strip().replace("**", "")
+                val = x.strip().replace("**", "").replace("%", "")
                 if val:
                     try: val = float(val) if "." in val else int(val)
                     except ValueError: pass
                     cells.append(val)
-            if cells:
-                row_idx += 1; ws.append(cells)
-                for col_idx in range(1, len(cells) + 1):
-                    cell = ws.cell(row=row_idx, column=col_idx)
-                    cell.alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
-                    cell.border = border
-                    if row_idx == 1: cell.fill = h_fill; cell.font = h_font
-                    elif row_idx % 2 == 0: cell.fill = z_fill
+            if len(cells) >= 4:
+                parsed_rows.append(cells[:6])
 
-    for idx, col in enumerate(ws.columns, start=1):
-        max_len = max((len(str(c.value or "")) for c in col), default=10)
-        ws.column_dimensions[get_column_letter(idx)].width = min(max_len + 6, 45)
+    start_tbl = 7
+    end_tbl = start_tbl + max(1, len(parsed_rows) - 1)
 
-    if row_idx > 2 and ws.max_column >= 2:
+    kpi_titles = ["إجمالي السجلات", "مجموع القيم المحققة", "متوسط الإنجاز %", "أعلى أداء مسجل", "متوسط المستهدف", "معدل الكفاءة"]
+    kpi_formulas = [
+        f"=COUNTA(A{start_tbl+1}:A{end_tbl})",
+        f"=SUM(C{start_tbl+1}:C{end_tbl})",
+        f"=ROUND(AVERAGE(E{start_tbl+1}:E{end_tbl}),1)",
+        f"=MAX(C{start_tbl+1}:C{end_tbl})",
+        f"=ROUND(AVERAGE(D{start_tbl+1}:D{end_tbl}),1)",
+        f"=ROUND(AVERAGE(C{start_tbl+1}:C{end_tbl})/MAX(AVERAGE(D{start_tbl+1}:D{end_tbl}),1)*100,1)"
+    ]
+    ws.row_dimensions[4].height = 22
+    ws.row_dimensions[5].height = 30
+    for idx in range(6):
+        c_top = ws.cell(row=4, column=idx+1, value=kpi_titles[idx])
+        c_top.font = Font(color="1B365D", bold=True, size=10)
+        c_top.fill = card_bg
+        c_top.alignment = Alignment(horizontal="center", vertical="center")
+        c_top.border = border
+
+        c_val = ws.cell(row=5, column=idx+1, value=kpi_formulas[idx])
+        c_val.font = Font(color="0F1C2E", bold=True, size=14)
+        c_val.fill = card_bg
+        c_val.alignment = Alignment(horizontal="center", vertical="center")
+        c_val.border = border
+
+    for r_i, row_data in enumerate(parsed_rows):
+        curr_r = start_tbl + r_i
+        ws.row_dimensions[curr_r].height = 24
+        for c_i, val in enumerate(row_data):
+            cell = ws.cell(row=curr_r, column=c_i+1, value=val)
+            cell.border = border
+            cell.alignment = Alignment(horizontal="center" if c_i >= 2 else "right", vertical="center", wrap_text=True)
+            if r_i == 0:
+                cell.fill = blue_hdr
+                cell.font = Font(color="FFFFFF", bold=True, size=11)
+            else:
+                cell.font = Font(color="1E293B", size=11)
+                if r_i % 2 == 0: cell.fill = zebra
+                if c_i == 5:
+                    s_val = str(val)
+                    if "ممتاز" in s_val: cell.fill = green_bg; cell.font = Font(color="155724", bold=True, size=11)
+                    elif "تحسين" in s_val: cell.fill = amber_bg; cell.font = Font(color="856404", bold=True, size=11)
+
+    for idx in range(1, 7):
+        col_ltr = get_column_letter(idx)
+        max_len = max((len(str(ws.cell(row=r, column=idx).value or "")) for r in range(4, end_tbl+1)), default=12)
+        ws.column_dimensions[col_ltr].width = min(max(max_len + 6, 16), 38)
+
+    if len(parsed_rows) > 2:
         try:
-            chart = BarChart(); chart.title = "التحليل البياني للمؤشرات"; chart.style = 11
-            chart.add_data(Reference(ws, min_col=2, min_row=1, max_row=row_idx), titles_from_data=True)
-            chart.set_categories(Reference(ws, min_col=1, min_row=2, max_row=row_idx))
-            ws.add_chart(chart, "G2")
-        except Exception: pass
+            chart = BarChart()
+            chart.type = "col"
+            chart.style = 10
+            chart.title = "مقارنة المحقق مقابل المستهدف"
+            chart.y_axis.title = "القيمة"
+            chart.x_axis.title = "البند"
+            chart.width = 18
+            chart.height = 11
+            data_ref = Reference(ws, min_col=3, max_col=4, min_row=start_tbl, max_row=end_tbl)
+            cats_ref = Reference(ws, min_col=1, min_row=start_tbl+1, max_row=end_tbl)
+            chart.add_data(data_ref, titles_from_data=True)
+            chart.set_categories(cats_ref)
+            ws.add_chart(chart, "H4")
+        except Exception as e:
+            print("Excel Chart Err:", e, flush=True)
 
-    path = "/tmp/Out.xlsx"
+    path = "/tmp/Executive_Dashboard.xlsx"
     wb.save(path)
-    send_file(cid, path, "Analytics_Report.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "📊 ملف Excel جاهز ومزود برسم بياني\n💡 هل تود عرض هذه النتائج في شرائح PowerPoint؟")
+    send_file(cid, path, "Executive_Dashboard.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "📊 تم بناء لوحة التحكم التنفيذية بالمعادلات التلقائية والرسوم البيانية\n💡 هل تود تحويل هذه المؤشرات إلى عرض تقديمي PowerPoint؟")
     if os.path.exists(path): os.remove(path)
     del wb; gc.collect()

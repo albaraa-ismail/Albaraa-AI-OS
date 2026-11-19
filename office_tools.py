@@ -63,15 +63,18 @@ def make_word(cid, msg):
     send_file(cid, path, "Executive_Document.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", f"📄 تم إعداد المستند الاحترافي: *{title}*")
     if os.path.exists(path): os.remove(path)
     del doc; gc.collect()
-
 def make_excel(cid, msg):
     import openpyxl
     from openpyxl.utils import get_column_letter
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    from openpyxl.chart import BarChart, Reference
+    from openpyxl.drawing.image import Image as XLImage
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import arabic_reshaper
+    from bidi.algorithm import get_display
 
     send_msg(cid, "👥 *هندسة لوحة القيادة التفاعلية:* جاري بناء قاعدة البيانات، المعادلات الحية، والرسوم البيانية...")
-    print("EXCEL 1: AI Start", flush=True)
     prompt = (
         "أنت مهندس بيانات خبير. أنشئ 3 أقسام مفصولة بسطر === فقط:\n"
         "1: عنوان رسمي فخم للتقرير (3 إلى 6 كلمات بدون أفعال أمر مثل عطني، صمم، اكتب).\n"
@@ -81,7 +84,6 @@ def make_excel(cid, msg):
         "التزم بالفصل بـ === بدون مقدمات."
     )
     res = ai_ask(msg, prompt)
-    print("EXCEL 2: AI Done", flush=True)
 
     it_p = iter([p.strip() for p in res.split("===") if p.strip()])
     p1, p2, p3 = next(it_p, ""), next(it_p, ""), next(it_p, "")
@@ -127,6 +129,7 @@ def make_excel(cid, msg):
 
     it_rows = iter(parsed); next(it_rows, None)
     rows = list(it_rows); last_r = len(rows) + 1
+    chart_labels, chart_vals = [], []
 
     for idx, r in enumerate(rows, 2):
         ws_data.row_dimensions[idx].height = 24
@@ -135,6 +138,10 @@ def make_excel(cid, msg):
         ac = ac if isinstance(ac, (int, float)) else 85
         tg = tg if isinstance(tg, (int, float)) else 90
         pct = round((ac / max(tg, 1)) * 100, 1)
+
+        if len(chart_labels) < 8:
+            chart_labels.append(get_display(arabic_reshaper.reshape(nm[:14])))
+            chart_vals.append(ac)
 
         entries = [nm, dp, ac, tg, f"=ROUND((C{idx}/MAX(D{idx},1))*100,1)", f"=C{idx}-D{idx}", f'=IF(E{idx}>=100,"متفوق 🌟",IF(E{idx}>=85,"جيد جداً ✅","يحتاج دعم ⚠️"))', nt]
         for c_i, val in enumerate(entries, 1):
@@ -150,7 +157,6 @@ def make_excel(cid, msg):
     for c_i in range(1, 9): ws_data.column_dimensions[get_column_letter(c_i)].width = 23 if c_i in (1, 8) else 16
     for c in range(1, 14): ws_dash.column_dimensions[get_column_letter(c)].width = 13
 
-    print("EXCEL 3: Building Dashboard", flush=True)
     ws_dash.merge_cells("B2:M3"); ws_dash["B2"] = f"لوحة القيادة التنفيذية: {title}"; ws_dash["B2"].fill = f_navy; ws_dash["B2"].font = Font(color="FFD166", size=18, bold=True); ws_dash["B2"].alignment = aln_c
     ws_dash.merge_cells("B4:M4"); ws_dash["B4"] = f"تاريخ الإصدار: {today_dates()}  |  نظام المتابعة والتحليل التنفيذي"; ws_dash["B4"].fill = f_slate; ws_dash["B4"].font = Font(color="FFFFFF", size=11); ws_dash["B4"].alignment = aln_c
 
@@ -163,3 +169,32 @@ def make_excel(cid, msg):
     ws_dash.row_dimensions.height = 24; ws_dash.row_dimensions.height = 38
     for cs, ce, tk, fk, hx in cards:
         ws_dash.merge_cells(f"{cs}6:{ce}6"); ws_dash.merge_cells(f"{cs}7:{ce}7")
+        ws_dash[f"{cs}6"].value = tk; ws_dash[f"{cs}6"].fill = PatternFill(start_color=hx, end_color=hx, fill_type="solid"); ws_dash[f"{cs}6"].font = Font(color="FFFFFF", size=11, bold=True); ws_dash[f"{cs}6"].alignment = aln_c
+        ws_dash[f"{cs}7"].value = fk; ws_dash[f"{cs}7"].fill = f_white; ws_dash[f"{cs}7"].font = Font(color=hx, size=18, bold=True); ws_dash[f"{cs}7"].alignment = aln_c; ws_dash[f"{cs}7"].border = brd
+
+    chart_img = "/tmp/dash_chart.png"
+    try:
+        fig, ax = plt.subplots(figsize=(9.5, 4.2), dpi=130)
+        fig.patch.set_facecolor('#0B192C'); ax.set_facecolor('#132743')
+        bars = ax.bar(chart_labels, chart_vals, color=['#00B4D8', '#0096C7', '#48CAE4', '#FFD166', '#06D6A0', '#118AB2', '#EF476F', '#8338EC'], width=0.5)
+        ax.set_title(get_display(arabic_reshaper.reshape("تحليل مؤشرات الأداء الفعلي")), color='#FFD166', fontsize=14, fontweight='bold', pad=12)
+        ax.tick_params(colors='white', labelsize=10)
+        for sp in ax.spines.values(): sp.set_visible(False)
+        for b in bars:
+            yv = b.get_height()
+            ax.text(b.get_x() + b.get_width()/2, yv + 1, str(yv), ha='center', va='bottom', color='white', fontsize=10, fontweight='bold')
+        plt.tight_layout(); plt.savefig(chart_img, facecolor='#0B192C'); plt.close(fig)
+        if os.path.exists(chart_img):
+            img_xl = XLImage(chart_img); img_xl.width = 760; img_xl.height = 335
+            ws_dash.add_image(img_xl, "B9")
+    except Exception as e:
+        print("Chart Img Err:", e, flush=True)
+
+    ws_dash.merge_cells("B27:M27"); ws_dash["B27"] = "💡 القراءة التحليلية والتوصيات التنفيذية"; ws_dash["B27"].fill = f_navy; ws_dash["B27"].font = Font(color="FFD166", size=12, bold=True); ws_dash["B27"].alignment = aln_r
+    ws_dash.merge_cells("B28:M33"); ws_dash["B28"] = summary.replace("**", ""); ws_dash["B28"].fill = f_white; ws_dash["B28"].font = Font(color="1E293B", size=11); ws_dash["B28"].alignment = Alignment(horizontal="right", vertical="top", wrap_text=True); ws_dash["B28"].border = brd
+
+    path = "/tmp/Executive_Dashboard.xlsx"; wb.save(path)
+    send_file(cid, path, "Executive_Dashboard.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"📊 تم إعداد لوحة القيادة التفاعلية: *{title}*\n✨ تشمل واجهة قيادة بصرية + ورقة بيانات بمعادلات تلقائية وتقييم آلي.")
+    for f in (path, chart_img):
+        if os.path.exists(f): os.remove(f)
+    del wb; gc.collect()

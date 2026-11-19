@@ -85,7 +85,6 @@ def live_board(bid):
     for r_i, r in enumerate(rows):
         cells = "".join([f"<td class='p-2'><input name='e{c_i}' value='{r[c_i] if c_i < len(r) else ''}' class='w-full bg-slate-900/70 border border-slate-700/70 rounded px-2 py-1 text-sm text-slate-100'></td>" for c_i in range(len(cols))])
         rows_html += f"<tr class='border-b border-slate-800 hover:bg-slate-800/40'><form method='POST'><input type='hidden' name='idx' value='{r_i}'>{cells}<td class='p-2 flex gap-1'><button name='action' value='edit' class='bg-emerald-600 hover:bg-emerald-500 px-2.5 py-1 rounded text-xs'>💾</button><button name='action' value='del' class='bg-rose-600 hover:bg-rose-500 px-2.5 py-1 rounded text-xs'>🗑</button></td></form></tr>"
-
     html = f"""<!DOCTYPE html><html dir='rtl' lang='ar'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
     <title>{board.get('title','لوحة التحكم')}</title>
     <script src='{_TW_CDN}'></script>
@@ -163,15 +162,20 @@ def home():
 @app.route("/whatsapp-webhook", methods=["POST"])
 def webhook():
     data = request.json or {}
+    if data.get("typeWebhook") != "incomingMessageReceived":
+        return jsonify({"status": "ignored"}), 200
     mid = data.get("idMessage", "")
-    if mid in SEEN: return jsonify({"status": "dup"}), 200
+    if not mid or mid in SEEN:
+        return jsonify({"status": "dup"}), 200
+    if len(SEEN) > 2000:
+        SEEN.clear()
     SEEN.add(mid)
     mdata = data.get("messageData", {})
     txt = (mdata.get("textMessageData", {}).get("textMessage") or mdata.get("extendedTextMessageData", {}).get("text") or "").strip()
     cid = data.get("senderData", {}).get("chatId", "")
     sname = data.get("senderData", {}).get("senderName", "User")
     if txt and cid and not any(txt.startswith(p) for p in ("🔍", "⚙️", "🛡️", "📑", "🌐", "🚀", "💻", "⚠", "✅", "🤖")):
-        print(f"IN: {data.get('typeWebhook')} | CID: {cid} | MSG: {txt[:20]}", flush=True)
+        print(f"IN: incomingMessageReceived | CID: {cid} | MSG: {txt[:20]}", flush=True)
         threading.Thread(target=safe_run, args=(run_task, cid, txt, "admin", sname), daemon=True).start()
     return jsonify({"status": "ok"}), 200
 

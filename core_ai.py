@@ -1,4 +1,4 @@
-import os, requests
+import os, time, requests
 
 G_URL = os.environ.get("GREEN_API_URL", "https://greenapi.com").strip().rstrip("/")
 G_ID = os.environ.get("GREEN_API_ID", "").strip()
@@ -24,25 +24,33 @@ def sb(m, t, p=None, q=""):
 
 def ai_ask(p, s):
     clean_s = s + STRICT_POLICY
-    if GEM_KEY:
-        for gem in ("gemini-2.5-flash", "gemini-2.0-flash"):
-            try:
-                u = f"https://googleapis.com{gem}:generateContent?key={GEM_KEY}"
-                r = requests.post(u, json={"contents": [{"parts": [{"text": f"{clean_s}\n\n{p}"}]}]}, timeout=60)
-                if r.status_code == 200:
-                    return r.json()["candidates"].pop(0)["content"]["parts"].pop(0)["text"].strip()
-                print(f"Gem Err ({gem}):", r.status_code, r.text[:150])
-            except Exception as e: print(f"Gem Ex ({gem}):", e)
+    last_err = "لا توجد مفاتيح API مفعلة"
     if GROQ_KEY:
-        for gm in ("llama-3.3-70b-versatile", "openai/gpt-oss-20b"):
+        for gm in ("llama-3.3-70b-versatile", "llama-3.1-8b-instant", "gemma2-9b-it"):
             try:
-                u = "https://groq.com"
-                r = requests.post(u, json={"model": gm, "messages": [{"role": "system", "content": clean_s}, {"role": "user", "content": p}]}, headers={"Authorization": f"Bearer {GROQ_KEY}"}, timeout=40)
+                r = requests.post("https://groq.com",
+                                  json={"model": gm, "messages": [{"role": "system", "content": clean_s}, {"role": "user", "content": p}]},
+                                  headers={"Authorization": f"Bearer {GROQ_KEY}"}, timeout=35)
                 if r.status_code == 200:
                     return r.json()["choices"].pop(0)["message"]["content"].strip()
-                print(f"Groq Err ({gm}):", r.status_code, r.text[:150])
-            except Exception as e: print(f"Groq Ex ({gm}):", e)
-    return "⚠️ تعذر الاتصال بمحرك التوليد، يرجى التحقق من مفاتيح API."
+                last_err = f"Groq({gm}): {r.status_code}"
+                print(last_err, r.text[:100])
+                if r.status_code == 429: time.sleep(2)
+            except Exception as e:
+                last_err = f"GroqEx: {str(e)[:40]}"
+    if GEM_KEY:
+        for gem in ("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"):
+            try:
+                u = f"https://googleapis.com{gem}:generateContent?key={GEM_KEY}"
+                r = requests.post(u, json={"contents": [{"parts": [{"text": f"{clean_s}\n\n{p}"}]}]}, timeout=55)
+                if r.status_code == 200:
+                    return r.json()["candidates"].pop(0)["content"]["parts"].pop(0)["text"].strip()
+                last_err = f"Gem({gem}): {r.status_code}"
+                print(last_err, r.text[:100])
+                if r.status_code == 429: time.sleep(2)
+            except Exception as e:
+                last_err = f"GemEx: {str(e)[:40]}"
+    return f"⚠️ تعذر التوليد ({last_err})"
 
 def send_msg(c, t):
     if t and G_URL:

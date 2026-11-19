@@ -1,6 +1,6 @@
 import time, json, pendulum
 from hijridate import Gregorian
-from ddgs import DDGS
+from duckduckgo_search import DDGS
 from core_ai import sb, ai_ask, send_msg
 from office_tools import make_kpi, make_word, make_excel
 from media_maker import make_ppt, make_video

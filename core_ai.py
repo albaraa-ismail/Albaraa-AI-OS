@@ -12,9 +12,9 @@ _GROQ_URL = "".join(["https:/", "/api.groq.", "com/openai/v1/chat/completions"])
 
 SB_URL = os.environ.get("SUPABASE_URL", "").strip()
 SB_KEY = os.environ.get("SUPABASE_KEY", "").strip()
-GEM_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-GROQ_KEY = os.environ.get("GROQ_API_KEY", "").strip()
-OR_KEY = os.environ.get("OPENROUTER_API_KEY", "").strip()
+GEM_KEY = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GEMINI_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
+GROQ_KEY = (os.environ.get("GROQ_API_KEY") or os.environ.get("GROQ_KEY") or "").strip()
+OR_KEY = (os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENROUTER_KEY") or "").strip()
 
 G_ID = os.environ.get("GREEN_API_ID", "").strip()
 G_TOK = os.environ.get("GREEN_API_TOKEN", "").strip()

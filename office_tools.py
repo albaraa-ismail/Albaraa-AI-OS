@@ -7,6 +7,14 @@ def today_dates():
     hijri = Gregorian(now.year, now.month, now.day).to_hijri()
     return f"{hijri.day}/{hijri.month}/{hijri.year}هـ - {now.format('YYYY/MM/DD')}م"
 
+def _clean_title(msg):
+    t = ai_ask(msg, "حول هذا الطلب إلى عنوان تقرير تنفيذي فخم من 3 إلى 6 كلمات بدون أي أفعال أمر مثل (عطني، صمم، اكتب، سوي، ابي). اكتب العنوان فقط بدون علامات تنصيص:").replace('"', '').strip()[:65]
+    if "تعذر" in t or len(t) < 4:
+        for w in ("عطني", "أعطني", "اعطني", "صمم", "اكتب", "سوي", "اعمل", "أريد", "ابي", "أبي", "لوحة تحكم"):
+            msg = msg.replace(w, "")
+        t = msg.strip()[:60] or "منظومة مؤشرات الأداء الاستراتيجية"
+    return t
+
 def _set_rtl(p):
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml import OxmlElement
@@ -30,6 +38,7 @@ def make_word(cid, msg):
     from docx import Document
     from docx.shared import Pt as DocPt
     send_msg(cid, "👥 *تفعيل غرفة عمليات الوثائق:*\n1️⃣ وكيل التخطيط يبني الهيكل...\n2️⃣ وكيل التحرير يصيغ المحاور...\n3️⃣ وكيل التدقيق يراجع الجودة...")
+    formal_title = _clean_title(msg)
     outline = ai_ask(msg, "ضع خطة هيكلية احترافية من 5 محاور رئيسية لتغطية هذا الموضوع بعمق أكاديمي وتنفيذي. اكتب كل محور في سطر مستقل بدون مقدمات:")
     sections = [s.strip().lstrip("-*#1234567890. ") for s in outline.split("\n") if len(s.strip()) > 3][:5]
     if not sections:
@@ -39,12 +48,12 @@ def make_word(cid, msg):
     doc.styles['Normal'].font.name = 'Arial'
     doc.styles['Normal'].font.size = DocPt(14)
 
-    title_p = doc.add_heading(msg[:70], 0); _set_rtl(title_p)
+    title_p = doc.add_heading(formal_title, 0); _set_rtl(title_p)
     date_p = doc.add_paragraph(f"تاريخ الإصدار: {today_dates()}"); _set_rtl(date_p)
 
     for sec in sections:
         h = doc.add_heading(sec, level=1); _set_rtl(h)
-        content = ai_ask(f"الموضوع: {msg}\nالمحور المطلوب: {sec}", "اكتب محتوى علمياً وتنفيذياً غزيراً ومفصلاً ومنقحاً باللغة العربية الفصحى مقسماً إلى فقرات وعناوين فرعية:")
+        content = ai_ask(f"الموضوع: {formal_title}\nالمحور المطلوب: {sec}", "اكتب محتوى علمياً وتنفيذياً غزيراً ومفصلاً ومنقحاً باللغة العربية الفصحى مقسماً إلى فقرات وعناوين فرعية:")
         for l in content.split("\n"):
             cl = l.strip().replace("**", "")
             if not cl: continue
@@ -55,7 +64,7 @@ def make_word(cid, msg):
 
     path = "/tmp/Doc.docx"
     doc.save(path)
-    send_file(cid, path, "Executive_Document.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "📄 تم إعداد المستند الاحترافي بنجاح\n💡 هل تود تحويل هذا المستند إلى عرض تقديمي أو ملخص تنفيذي؟")
+    send_file(cid, path, "Executive_Document.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", f"📄 تم إعداد المستند الاحترافي: *{formal_title}*\n💡 هل تود تحويل هذا المستند إلى عرض تقديمي أو ملخص تنفيذي؟")
     if os.path.exists(path): os.remove(path)
     del doc; gc.collect()
 
@@ -63,134 +72,145 @@ def make_excel(cid, msg):
     import openpyxl
     from openpyxl.utils import get_column_letter
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    from openpyxl.chart import BarChart, Reference
+    from openpyxl.chart import BarChart, PieChart, Reference
+    from openpyxl.formatting.rule import DataBarRule
 
-    send_msg(cid, "👥 *تفعيل غرفة عمليات لوحة البيانات:*\n1️⃣ وكيل التحليل يبني البيانات الواقعية...\n2️⃣ وكيل المؤشرات يركّب المعادلات والرسوم...")
-    prompt_excel = (
-        "أنشئ جدول بيانات تنفيذي واقعي وغني بالتفاصيل مكون من 16 صفاً (صف العناوين + 15 صف بيانات حقيقية) و 6 أعمدة بالضبط:\n"
-        "العمود 1: اسم البند أو الموظف أو القسم (نص)\n"
-        "العمود 2: التصنيف أو الإدارة (نص)\n"
-        "العمود 3: القيمة المحققة أو النقاط (رقم صحيح فقط بدون رموز)\n"
-        "العمود 4: المستهدف المطلوب (رقم صحيح فقط بدون رموز)\n"
-        "العمود 5: نسبة الإنجاز % (رقم صحيح من 60 إلى 100 فقط بدون علامة %)\n"
-        "العمود 6: الحالة التنفيذية (ممتاز / جيد جداً / يحتاج تحسين)\n"
-        "افصل بين الأعمدة بعلامة | فقط بدون أي مقدمات أو شروحات أو خطوط فصل."
+    send_msg(cid, "👥 *هندسة لوحة القيادة التفاعلية:*\n1️⃣ بناء قاعدة البيانات والمعادلات الحية...\n2️⃣ تصميم واجهة المؤشرات والرسوم البيانية...")
+    formal_title = _clean_title(msg)
+
+    prompt_data = (
+        "أنشئ بيانات واقعية غنية ومفصلة من 16 صفاً (صف عناوين + 15 صف بيانات حقيقية) بـ 5 أعمدة بالضبط:\n"
+        "العمود 1: الاسم أو البند أو المبادرة (نص واقعي)\n"
+        "العمود 2: الإدارة أو التصنيف (نص)\n"
+        "العمود 3: المحقق الفعلي (رقم صحيح واقعي بين 65 و 120)\n"
+        "العمود 4: المستهدف المخطط (رقم صحيح واقعي بين 80 و 110)\n"
+        "العمود 5: ملاحظة تنفيذية موجزة (جملة قصيرة من 3 كلمات)\n"
+        "افصل بين الأعمدة بعلامة | فقط بدون مقدمات أو خطوط فصل."
     )
-    raw = ai_ask(msg, prompt_excel)
+    raw = ai_ask(msg, prompt_data)
+
+    summary_txt = ai_ask(
+        f"الموضوع: {formal_title}\nالبيانات:\n{raw[:1200]}",
+        "اكتب ملخصاً تنفيذياً مركزاً من 3 نقاط قصيرة ومباشرة يبرز أهم الاستنتاجات والتوصيات بناءً على هذه البيانات (بدون مقدمات):"
+    )
 
     wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.sheet_view.rightToLeft = True
-    ws.sheet_view.showGridLines = True
-    ws.title = "لوحة التحكم التنفيذية"
 
-    navy = PatternFill(start_color="0F1C2E", end_color="0F1C2E", fill_type="solid")
-    blue_hdr = PatternFill(start_color="1B365D", end_color="1B365D", fill_type="solid")
-    card_bg = PatternFill(start_color="EBF3FA", end_color="EBF3FA", fill_type="solid")
-    zebra = PatternFill(start_color="F7FAFC", end_color="F7FAFC", fill_type="solid")
-    green_bg = PatternFill(start_color="D4EDDA", end_color="D4EDDA", fill_type="solid")
-    amber_bg = PatternFill(start_color="FFF3CD", end_color="FFF3CD", fill_type="solid")
+    # ==========================================
+    # الورقة 1: لوحة القيادة البصرية (Dashboard)
+    # ==========================================
+    ws_dash = wb.active
+    ws_dash.title = "لوحة القيادة"
+    ws_dash.sheet_view.rightToLeft = True
+    ws_dash.sheet_view.showGridLines = False
 
-    thin_side = Side(style='thin', color='CBD5E1')
-    border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+    # ==========================================
+    # الورقة 2: البيانات التفصيلية والمعادلات
+    # ==========================================
+    ws_data = wb.create_sheet(title="البيانات والتحليل")
+    ws_data.sheet_view.rightToLeft = True
+    ws_data.sheet_view.showGridLines = True
 
-    ws.merge_cells("A1:F1")
-    ws["A1"] = f"📊 لوحة التحكم التحليلية: {msg[:55]}"
-    ws["A1"].font = Font(color="FFD166", bold=True, size=15)
-    ws["A1"].fill = navy
-    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
-    ws.row_dimensions[1].height = 36
+    # لوحة الألوان الهندسية
+    c_navy = "0B192C"
+    c_slate = "1E3E62"
+    c_accent = "FF6500"
+    c_gold = "FFD166"
+    c_bg = "F1F5F9"
+    c_white = "FFFFFF"
+    c_card_1 = "1E3A8A"
+    c_card_2 = "0F766E"
+    c_card_3 = "B45309"
+    c_card_4 = "4338CA"
 
-    ws.merge_cells("A2:F2")
-    ws["A2"] = f"تاريخ التحديث: {today_dates()}  |  نموذج التحليل التنفيذي الآلي"
-    ws["A2"].font = Font(color="FFFFFF", size=10)
-    ws["A2"].fill = blue_hdr
-    ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
-    ws.row_dimensions[2].height = 22
+    fill_navy = PatternFill(start_color=c_navy, end_color=c_navy, fill_type="solid")
+    fill_slate = PatternFill(start_color=c_slate, end_color=c_slate, fill_type="solid")
+    fill_bg = PatternFill(start_color=c_bg, end_color=c_bg, fill_type="solid")
+    fill_white = PatternFill(start_color=c_white, end_color=c_white, fill_type="solid")
+    fill_zebra = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+    fill_green = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
+    fill_blue = PatternFill(start_color="DBEAFE", end_color="DBEAFE", fill_type="solid")
+    fill_amber = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
 
-    parsed_rows = []
+    thin = Side(style='thin', color='CBD5E1')
+    med_navy = Side(style='medium', color=c_navy)
+    b_cell = Border(left=thin, right=thin, top=thin, bottom=thin)
+    b_card = Border(left=thin, right=thin, top=med_navy, bottom=thin)
+
+    # تجهيز البيانات وتنظيفها
+    parsed = []
     for l in raw.split("\n"):
         if "|" in l and not set(l.replace("|", "").strip()).issubset({"-", ":", " "}):
-            cells = []
+            row_vals = []
             for x in l.split("|"):
-                val = x.strip().replace("**", "").replace("%", "")
-                if val:
-                    try: val = float(val) if "." in val else int(val)
+                v = x.strip().replace("**", "")
+                if v:
+                    try: v = float(v) if "." in v else int(v)
                     except ValueError: pass
-                    cells.append(val)
-            if len(cells) >= 4:
-                parsed_rows.append(cells[:6])
+                    row_vals.append(v)
+            if len(row_vals) >= 4:
+                parsed.append(row_vals[:5])
 
-    start_tbl = 7
-    end_tbl = start_tbl + max(1, len(parsed_rows) - 1)
+    if len(parsed) < 2:
+        parsed = [
+            ["البند", "القسم", "المحقق", "المستهدف", "ملاحظة"],
+            ["مؤشر الكفاءة التشغيلية", "العمليات", 94, 90, "تجاوز المستهدف بنجاح"],
+            ["مؤشر جودة المخرجات", "الجودة", 88, 92, "أداء مستقر ومتصاعد"],
+            ["مؤشر سرعة الإنجاز", "التطوير", 96, 85, "أعلى معدل أداء"]
+        ]
 
-    kpi_titles = ["إجمالي السجلات", "مجموع القيم المحققة", "متوسط الإنجاز %", "أعلى أداء مسجل", "متوسط المستهدف", "معدل الكفاءة"]
-    kpi_formulas = [
-        f"=COUNTA(A{start_tbl+1}:A{end_tbl})",
-        f"=SUM(C{start_tbl+1}:C{end_tbl})",
-        f"=ROUND(AVERAGE(E{start_tbl+1}:E{end_tbl}),1)",
-        f"=MAX(C{start_tbl+1}:C{end_tbl})",
-        f"=ROUND(AVERAGE(D{start_tbl+1}:D{end_tbl}),1)",
-        f"=ROUND(AVERAGE(C{start_tbl+1}:C{end_tbl})/MAX(AVERAGE(D{start_tbl+1}:D{end_tbl}),1)*100,1)"
+    # تعبئة ورقة البيانات بالمعادلات الحية
+    headers = ["البند / الموظف", "الإدارة / التصنيف", "المحقق الفعلي", "المستهدف المخطط", "نسبة الإنجاز %", "الفارق عن المستهدف", "التقييم الآلي", "ملاحظات المتابعة"]
+    ws_data.row_dimensions.height = 30
+    for col_idx, h_text in enumerate(headers, start=1):
+        cell = ws_data.cell(row=1, column=col_idx, value=h_text)
+        cell.fill = fill_navy
+        cell.font = Font(color=c_gold, bold=True, size=11)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = b_cell
+
+    data_rows = parsed[1:]
+    last_row = len(data_rows) + 1
+
+    for idx, r in enumerate(data_rows, start=2):
+        ws_data.row_dimensions[idx].height = 24
+        name_v = r
+        dept_v = r[1]
+        act_v = r[2] if isinstance(r[2], (int, float)) else 85
+        tgt_v = r[3] if isinstance(r[3], (int, float)) else 90
+        note_v = r[4] if len(r) > 4 else "متابعة دورية مستمرة"
+
+        row_entries = [
+            name_v,
+            dept_v,
+            act_v,
+            tgt_v,
+            f"=ROUND((C{idx}/MAX(D{idx},1))*100, 1)",
+            f"=C{idx}-D{idx}",
+            f'=IF(E{idx}>=100,"متفوق 🌟",IF(E{idx}>=85,"جيد جداً ✅","يحتاج دعم ⚠️"))',
+            note_v
+        ]
+
+        for c_idx, val in enumerate(row_entries, start=1):
+            cell = ws_data.cell(row=idx, column=c_idx, value=val)
+            cell.border = b_cell
+            cell.font = Font(color="0F172A", size=11, bold=(c_idx in (1, 5)))
+            cell.alignment = Alignment(horizontal="center" if c_idx in (3, 4, 5, 6, 7) else "right", vertical="center")
+            if idx % 2 == 0: cell.fill = fill_zebra
+
+    # صف الإجماليات والمتوسطات في ورقة البيانات
+    tot_row = last_row + 1
+    ws_data.row_dimensions[tot_row].height = 28
+    tot_entries = [
+        "الإجمالي / المتوسط العام",
+        f"=COUNTA(A2:A{last_row}) & \" سجل\"",
+        f"=SUM(C2:C{last_row})",
+        f"=SUM(D2:D{last_row})",
+        f"=ROUND(AVERAGE(E2:E{last_row}), 1)",
+        f"=SUM(F2:F{last_row})",
+        f'=COUNTIF(E2:E{last_row}, ">=85") & " محقق للمعيار"',
+        "مؤشر الأداء الكلي"
     ]
-    ws.row_dimensions[4].height = 22
-    ws.row_dimensions[5].height = 30
-    for idx in range(6):
-        c_top = ws.cell(row=4, column=idx+1, value=kpi_titles[idx])
-        c_top.font = Font(color="1B365D", bold=True, size=10)
-        c_top.fill = card_bg
-        c_top.alignment = Alignment(horizontal="center", vertical="center")
-        c_top.border = border
-
-        c_val = ws.cell(row=5, column=idx+1, value=kpi_formulas[idx])
-        c_val.font = Font(color="0F1C2E", bold=True, size=14)
-        c_val.fill = card_bg
-        c_val.alignment = Alignment(horizontal="center", vertical="center")
-        c_val.border = border
-
-    for r_i, row_data in enumerate(parsed_rows):
-        curr_r = start_tbl + r_i
-        ws.row_dimensions[curr_r].height = 24
-        for c_i, val in enumerate(row_data):
-            cell = ws.cell(row=curr_r, column=c_i+1, value=val)
-            cell.border = border
-            cell.alignment = Alignment(horizontal="center" if c_i >= 2 else "right", vertical="center", wrap_text=True)
-            if r_i == 0:
-                cell.fill = blue_hdr
-                cell.font = Font(color="FFFFFF", bold=True, size=11)
-            else:
-                cell.font = Font(color="1E293B", size=11)
-                if r_i % 2 == 0: cell.fill = zebra
-                if c_i == 5:
-                    s_val = str(val)
-                    if "ممتاز" in s_val: cell.fill = green_bg; cell.font = Font(color="155724", bold=True, size=11)
-                    elif "تحسين" in s_val: cell.fill = amber_bg; cell.font = Font(color="856404", bold=True, size=11)
-
-    for idx in range(1, 7):
-        col_ltr = get_column_letter(idx)
-        max_len = max((len(str(ws.cell(row=r, column=idx).value or "")) for r in range(4, end_tbl+1)), default=12)
-        ws.column_dimensions[col_ltr].width = min(max(max_len + 6, 16), 38)
-
-    if len(parsed_rows) > 2:
-        try:
-            chart = BarChart()
-            chart.type = "col"
-            chart.style = 10
-            chart.title = "مقارنة المحقق مقابل المستهدف"
-            chart.y_axis.title = "القيمة"
-            chart.x_axis.title = "البند"
-            chart.width = 18
-            chart.height = 11
-            data_ref = Reference(ws, min_col=3, max_col=4, min_row=start_tbl, max_row=end_tbl)
-            cats_ref = Reference(ws, min_col=1, min_row=start_tbl+1, max_row=end_tbl)
-            chart.add_data(data_ref, titles_from_data=True)
-            chart.set_categories(cats_ref)
-            ws.add_chart(chart, "H4")
-        except Exception as e:
-            print("Excel Chart Err:", e, flush=True)
-
-    path = "/tmp/Executive_Dashboard.xlsx"
-    wb.save(path)
-    send_file(cid, path, "Executive_Dashboard.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "📊 تم بناء لوحة التحكم التنفيذية بالمعادلات التلقائية والرسوم البيانية\n💡 هل تود تحويل هذه المؤشرات إلى عرض تقديمي PowerPoint؟")
-    if os.path.exists(path): os.remove(path)
-    del wb; gc.collect()
+    for c_idx, val in enumerate(tot_entries, start=1):
+        cell = ws_data.cell(row=tot_row, column=c_idx, value=val)
+        cell.fill = fill_slate

@@ -2,8 +2,9 @@ import time, json, pendulum
 from hijridate import Gregorian
 from duckduckgo_search import DDGS
 from core_ai import sb, ai_ask, send_msg
-from office_tools import make_kpi, make_word, make_excel
-from media_maker import make_ppt, make_video
+from office_tools import make_kpi, make_word, make_excel, make_pptx
+from media_maker import make_video
+from agents.research_agent import ResearchAgent
 from memory_engine import get_context, save_memory
 from evolution_engine import propose_agent, approve_pending, manage_agents, add_reminder, backup_memory, self_evolve_and_research, periodic_analytics
 
@@ -37,7 +38,8 @@ def run_task(cid, msg, role, sname):
         propose_agent(cid, msg, sname); return
 
     send_msg(cid, "🧭 *غرفة عمليات الوكلاء:* تم استلام الهدف، جاري التوجيه الفوري...")
-
+if any(k in low for k in ("رابط", "روابط", "موقع", "مواقع", "برنامج", "برامج", "تحميل")):
+        send_msg(cid, ResearchAgent().search_links(msg)); return
     if any(k in low for k in ("فيديو", "فديو", "مقطع", "video")): deliv, plan = "video", {}
     elif any(k in low for k in ("عرض", "بوربوينت", "شرائح")): deliv, plan = "ppt", {}
     elif any(k in low for k in ("اكسل", "إكسل", "excel", "جدول", "لوحة تحكم")): deliv, plan = "excel", {}
@@ -49,12 +51,12 @@ def run_task(cid, msg, role, sname):
     if deliv == "video": make_video(cid, msg); dtype = "Video"
     elif deliv == "word": make_word(cid, msg); dtype = "Word"
     elif deliv == "excel": make_excel(cid, msg); dtype = "Excel"
-    elif deliv == "ppt": make_ppt(cid, msg); dtype = "PowerPoint"
+    elif deliv == "ppt": make_pptx(cid, msg); dtype = "PowerPoint"
     else:
         steps_txt = " ⬅️ ".join(plan.get("steps", [])[:3])
         web = ""
         try:
-            with DDGS() as dd: web = "\n".join([x.get("body", "") for x in dd.text(plan.get("search_query", msg), max_results=3)])
+            with DDGS() as dd: web = "\n".join([f"{x.get('title','')}: {x.get('href','')} - {x.get('body','')}" for x in dd.text(plan.get("search_query", msg), max_results=3)])
         except Exception: pass
 
         ctx = get_context(cid)

@@ -4,7 +4,7 @@ from agent_brain import run_task
 from safe_guard import safe_run
 from auto_scheduler import start_scheduler
 from media_reader import analyze_media
-from core_ai import sb
+from core_ai import sb, ai_ask
 
 app = Flask(__name__)
 start_scheduler()
@@ -40,6 +40,18 @@ def custom_board(bid):
         if act == "add": rows.append([request.form.get(f"c{i}", "") for i in range(len(cols))])
         elif act == "save": rows[int(request.form.get("idx"))] = [request.form.get(f"c{i}", "") for i in range(len(cols))]
         elif act == "del": rows.pop(int(request.form.get("idx")))
+        elif act == "chat":
+            q = request.form.get("q", "").strip()
+            if q:
+                p = f"الجدول: {json.dumps(board, ensure_ascii=False)}\nالطلب: {q}\nإذا كان الطلب تعديل أو إضافة، أرجع JSON فقط فيه cols و rows و title. وإلا أجب باختصار."
+                ans = ai_ask(p, "أنت مساعد لوحة تحكم ذكي.")
+                if "{" in ans and "rows" in ans:
+                    board.update(json.loads(ans[ans.find("{"):ans.rfind("}")+1]))
+                    cols, rows = board.get("cols", cols), board.get("rows", rows)
+                    ai_reply = "✅ تم تحديث الجدول وحفظه بنجاح!"
+                else:
+                    ai_reply = ans
+
         sb("PATCH", "self_learning_logs", {"lesson_learned": json.dumps(board, ensure_ascii=False)}, q=f"?id=eq.{bid}")
     bars = ""
     for r in rows[:10]:
@@ -49,8 +61,9 @@ def custom_board(bid):
     js = "<script>function f(q){document.querySelectorAll('.rec').forEach(c=>{c.style.display=c.innerHTML.includes(q)?'block':'none'})}</script>"
     top = f"<div class='grid'><div class='card'><b>📊 السجلات: {len(rows)}</b><br><a href='/board/{bid}/export' style='color:#38bdf8;font-weight:bold'>📥 تحميل Excel</a></div><div class='card'><b>📈 مؤشر الأداء الحي</b>{bars}</div></div>"
     srch = f"<input placeholder='🔍 ابحث بالاسم أو القسم أو الرقم...' onkeyup='f(this.value)' style='margin-bottom:12px;width:96%'>{js}"
+    chat_ui = f"<div class='card'><form method='POST'><input name='q' placeholder='اطلب من الوكيل تعديل الجدول أو تحليله...' required><button name='action' value='chat'>إرسال للوكيل</button></form><p style='color:#38bdf8'>{locals().get('ai_reply','')}</p></div>"
     add_f = "".join([f"<div><small>{c}</small><input name='c{i}' required></div>" for i, c in enumerate(cols)])
-    html = f"{top}{srch}<div class='card'><h3>➕ إضافة سجل جديد</h3><form method='POST'><div class='grid'>{add_f}</div><button name='action' value='add'>إضافة وحفظ</button></form></div>"
+    html = f"{top}{chat_ui}{srch}<div class='card'><h3>➕ إضافة سجل جديد</h3><form method='POST'><div class='grid'>{add_f}</div><button name='action' value='add'>إضافة وحفظ</button></form></div>"
     for idx, r in enumerate(rows):
         flds = "".join([f"<div><small>{cols[i] if i<len(cols) else ''}</small><input name='c{i}' value='{v}'></div>" for i, v in enumerate(r)])
         html += f"<div class='card rec'><h4>#{idx+1} — {next(iter(r), '')}</h4><form method='POST'><input type='hidden' name='idx' value='{idx}'><div class='grid'>{flds}</div><button name='action' value='save'>💾 حفظ التعديل</button> <button class='del' name='action' value='del'>🗑️ حذف</button></form></div>"

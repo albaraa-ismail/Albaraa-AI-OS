@@ -8,7 +8,11 @@ GROQ_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 SB_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
 SB_KEY = os.environ.get("SUPABASE_KEY", "").strip()
 
-POLICY = "\n[قواعد صارمة]: اكتب محتوى عميقاً ومنظماً باللغة العربية الفصحى. يُحظر ذكر اسم أي منظومة أو ذكاء اصطناعي أو وضع أي توقيع."
+POLICY = "\n[قواعد صارمة]: اكتب محتوى عميقاً وغنياً بالأرقام والمعايير التنفيذية باللغة العربية الفصحى. يُحظر ذكر اسم أي منظومة أو ذكاء اصطناعي أو وضع أي توقيع أو اعتذار."
+
+def _is_refusal(txt):
+    bad = ("عذراً", "عذرا", "لا يمكنني", "آسف", "Sorry", "I cannot", "As an AI")
+    return any(w in txt[:50] for w in bad)
 
 def sb(m, t, p=None, q=""):
     if not SB_URL or not SB_KEY: return []
@@ -26,19 +30,29 @@ def ai_ask(p, s):
     clean_s, err = s + POLICY, "لا توجد مفاتيح"
     if GROQ_KEY:
         u_g = base64.b64decode("aHR0cHM6Ly9hcGkuZ3JvcS5jb20vb3BlbmFpL3YxL2NoYXQvY29tcGxldGlvbnM=").decode()
-        for gm in ("openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3-32b", "llama-3.3-70b-versatile"):
+        for gm in ("llama-3.3-70b-versatile", "qwen/qwen3-32b", "openai/gpt-oss-120b"):
             try:
-                r = requests.post(u_g, json={"model": gm, "messages": [{"role": "system", "content": clean_s}, {"role": "user", "content": p}]}, headers={"Authorization": f"Bearer {GROQ_KEY}"}, timeout=35)
-                if r.status_code == 200: return r.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                r = requests.post(u_g, json={"model": gm, "messages": [{"role": "system", "content": clean_s}, {"role": "user", "content": p}], "temperature": 0.35}, headers={"Authorization": f"Bearer {GROQ_KEY}"}, timeout=35)
+                if r.status_code == 200:
+                    choices = r.json().get("choices", [])
+                    if choices:
+                        txt = choices.pop(0).get("message", {}).get("content", "").strip()
+                        if txt and not _is_refusal(txt): return txt
                 err = f"Groq({gm}):{r.status_code}"
                 if r.status_code == 429: time.sleep(2)
             except Exception as e: err = f"GroqEx:{str(e)[:30]}"
     if GEM_KEY:
         b_gem = base64.b64decode("aHR0cHM6Ly9nZW5lcmF0aXZlbGFuZ3VhZ2UuZ29vZ2xlYXBpcy5jb20vdjFiZXRhL21vZGVscy8=").decode()
-        for gem in ("gemini-3-flash-preview", "gemini-3.1-flash-lite-preview", "gemini-2.5-flash"):
+        for gem in ("gemini-2.5-flash", "gemini-2.0-flash"):
             try:
                 r = requests.post(f"{b_gem}{gem}:generateContent?key={GEM_KEY}", json={"contents": [{"parts": [{"text": f"{clean_s}\n\n{p}"}]}]}, timeout=55)
-                if r.status_code == 200: return r.json().get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
+                if r.status_code == 200:
+                    cands = r.json().get("candidates", [])
+                    if cands:
+                        parts = cands.pop(0).get("content", {}).get("parts", [])
+                        if parts:
+                            txt = parts.pop(0).get("text", "").strip()
+                            if txt and not _is_refusal(txt): return txt
                 err = f"Gem({gem}):{r.status_code}"
                 if r.status_code == 429: time.sleep(2)
             except Exception as e: err = f"GemEx:{str(e)[:30]}"

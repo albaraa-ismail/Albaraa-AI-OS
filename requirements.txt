@@ -1,44 +1,30 @@
-# الخادم والأمان والاتصالات عالية الأداء
+# الأداء والخادم
 flask
 gunicorn
 requests
 httpx
 aiohttp
-tenacity
 
-# شبكة الوكلاء المتعاونين وهيكلة البيانات (AI Agents)
-langgraph
-langchain-core
-pydantic
-pydantic-ai
-
-# البحث واستخراج البيانات من الويب واليوتيوب
+# البحث واستخراج البيانات
 duckduckgo-search
 beautifulsoup4
 lxml
 trafilatura
 youtube-transcript-api
 
-# حزمة مايكروسوفت أوفيس وتحليل البيانات
+# حزمة مايكروسوفت أوفيس والبيانات
 python-docx
 openpyxl
 xlsxwriter
 pandas
 python-pptx
 
-# الرسوم البيانية العصرية الاحترافية
-plotly
-kaleido
-seaborn
+# الرسوم البيانية والباركود
 matplotlib
+seaborn
 qrcode
 
-# القياسات والحسابات العلمية والزمنية والهجري
-numpy
-scipy
-statsmodels
-scikit-learn
-sympy
+# التوقيت والتقويم الهجري
 pendulum
 python-dateutil
 hijridate
@@ -49,15 +35,13 @@ pdfplumber
 reportlab
 fpdf2
 
-# الصوت البشري وإنتاج الفيديو المتكامل
+# الصوت البشري وإنتاج الفيديو
 edge-tts
 gTTS
-moviepy==1.0.3
 imageio-ffmpeg
 pydub
 
 # معالجة الصور والخطوط العربية
 Pillow
-opencv-python-headless
 arabic-reshaper
 python-bidi

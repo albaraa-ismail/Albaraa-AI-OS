@@ -60,7 +60,7 @@ def ai_ask(prompt: str, system_prompt: str = "", temperature: float = 0.3) -> st
                     "contents": [{"parts": [{"text": prompt}]}],
                     "generationConfig": {"temperature": temperature}
                 }
-                r = requests.post(url, json=payload, timeout=12)
+                r = requests.post(url, json=payload, timeout=25)
                 if r.status_code == 200:
                     data = r.json()
                     txt = data["candidates"][0]["content"]["parts"][0]["text"].strip()

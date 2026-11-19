@@ -159,6 +159,46 @@ def make_pptx(cid, msg):
 
     send_msg(cid, "📊 *تفعيل استوديو العروض التقديمية:* جاري تصميم الشرائح وتنسيق الهوية البصرية...")
     title = _clean_title(msg)
+    cards = [("B", "D", "إجمالي الأداء المحقق", f"{round(sum_ac, 1)}", "1E3A8A"), ("E", "G", "متوسط نسبة الإنجاز", f"{avg_pct}%", "0F766E"), ("H", "J", "الفارق عن المستهدف", f"{'+' if tot_diff > 0 else ''}{tot_diff}", "B45309"), ("K", "M", "نسبة المحققين للمعيار", f"{round((pass_cnt/cnt)*100)}%", "4338CA")]
+    ws_dash.row_dimensions.height = 26; ws_dash.row_dimensions.height = 40
+    for cs, ce, tk, fk, hx in cards:
+        ws_dash.merge_cells(f"{cs}6:{ce}6"); ws_dash.merge_cells(f"{cs}7:{ce}7")
+        ws_dash[f"{cs}6"].value = tk; ws_dash[f"{cs}6"].fill = PatternFill(start_color=hx, end_color=hx, fill_type="solid"); ws_dash[f"{cs}6"].font = Font(color="FFFFFF", size=11, bold=True); ws_dash[f"{cs}6"].alignment = aln_c
+        ws_dash[f"{cs}7"].value = fk; ws_dash[f"{cs}7"].fill = f_white; ws_dash[f"{cs}7"].font = Font(color=hx, size=18, bold=True); ws_dash[f"{cs}7"].alignment = aln_c; ws_dash[f"{cs}7"].border = brd
+
+    for r_idx in range(9, 27): ws_dash.row_dimensions[r_idx].height = 20
+    chart_img = "/tmp/dash_chart.png"
+    try:
+        fig, ax = plt.subplots(figsize=(10.5, 4.3), dpi=130)
+        fig.patch.set_facecolor('#0B192C'); ax.set_facecolor('#132743')
+        x_pos = range(len(chart_labels))
+        b1 = ax.bar([p - 0.18 for p in x_pos], chart_act, width=0.35, label=get_display(arabic_reshaper.reshape("المحقق الفعلي")), color='#00B4D8')
+        b2 = ax.bar([p + 0.18 for p in x_pos], chart_tgt, width=0.35, label=get_display(arabic_reshaper.reshape("المستهدف المخطط")), color='#FFD166')
+        ax.set_xticks(list(x_pos)); ax.set_xticklabels(chart_labels)
+        ax.set_title(get_display(arabic_reshaper.reshape("مقارنة الأداء المحقق مقابل المستهدف")), color='#FFD166', fontsize=14, fontweight='bold', pad=12)
+        ax.tick_params(colors='white', labelsize=10)
+        ax.legend(facecolor='#0B192C', edgecolor='none', labelcolor='white', fontsize=10)
+        for sp in ax.spines.values(): sp.set_visible(False)
+        for b in b1:
+            yv = b.get_height()
+            ax.text(b.get_x() + b.get_width()/2, yv + 1, str(yv), ha='center', va='bottom', color='#00B4D8', fontsize=9, fontweight='bold')
+        plt.tight_layout(); plt.savefig(chart_img, facecolor='#0B192C'); plt.close(fig)
+        if os.path.exists(chart_img):
+            img_xl = XLImage(chart_img); img_xl.width = 820; img_xl.height = 330
+            ws_dash.add_image(img_xl, "B9")
+    except Exception as e: print("Chart Img Err:", e, flush=True)
+
+    clean_sum = summary.replace("**", "").replace("###", "").replace("##", "").strip()
+    ws_dash.merge_cells("B27:M27"); ws_dash["B27"] = "💡 القراءة التحليلية والتوصيات التنفيذية للإدارة"; ws_dash["B27"].fill = f_navy; ws_dash["B27"].font = Font(color="FFD166", size=12, bold=True); ws_dash["B27"].alignment = aln_r
+    ws_dash.row_dimensions.height = 28
+    ws_dash.merge_cells("B28:M33"); ws_dash["B28"] = clean_sum; ws_dash["B28"].fill = f_white; ws_dash["B28"].font = Font(color="1E293B", size=11); ws_dash["B28"].alignment = Alignment(horizontal="right", vertical="top", wrap_text=True); ws_dash["B28"].border = brd
+
+    path = "/tmp/Executive_Dashboard.xlsx"; wb.save(path)
+    send_file(cid, path, "Executive_Dashboard.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"📊 تم إعداد لوحة القيادة المؤسسية: *{title}*\n✨ تشمل: 4 بطاقات مؤشرات + سجل الموظفين وخطة التطوير.")
+    if os.path.exists(chart_img): send_file(cid, chart_img, "Performance_Chart.png", "image/png", f"📈 الرسم البياني لمؤشرات: *{title}*")
+    for f in (path, chart_img):
+        if os.path.exists(f): os.remove(f)
+    del wb; gc.collect()
 
     prompt = (
         f"أنت خبير تصميم عروض تقديمية تنفيذية. أنشئ محتوى عرض تقديمي احترافي حول: {msg}\n"

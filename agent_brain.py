@@ -40,7 +40,7 @@ def run_task(cid, msg, role, sname):
     send_msg(cid, "🧭 *غرفة عمليات الوكلاء:* تم استلام الهدف، جاري التوجيه الفوري...")
 if any(k in low for k in ("رابط", "روابط", "موقع", "مواقع", "برنامج", "برامج", "تحميل")):
         send_msg(cid, ResearchAgent().search_links(msg)); return
-    if any(k in low for k in ("فيديو", "فديو", "مقطع", "video")): deliv, plan = "video", {}
+if any(k in low for k in ("فيديو", "فديو", "مقطع", "video")): deliv, plan = "video", {}
     elif any(k in low for k in ("عرض", "بوربوينت", "شرائح")): deliv, plan = "ppt", {}
     elif any(k in low for k in ("اكسل", "إكسل", "excel", "جدول", "لوحة تحكم")): deliv, plan = "excel", {}
     elif any(k in low for k in ("وورد", "word", "بحث", "تقرير رسمي")): deliv, plan = "word", {}

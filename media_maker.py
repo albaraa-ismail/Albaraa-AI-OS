@@ -2,6 +2,7 @@ import os, json, asyncio, subprocess
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
+from pptx.enum.text import PP_ALIGN
 import edge_tts
 from gtts import gTTS
 from PIL import Image, ImageDraw, ImageFont
@@ -9,6 +10,7 @@ import arabic_reshaper
 from bidi.algorithm import get_display
 import plotly.graph_objects as go
 import imageio_ffmpeg
+from duckduckgo_search import DDGS
 from core_ai import ai_ask, send_msg, send_file
 from office_tools import today_dates
 
@@ -27,9 +29,9 @@ def _style_slide(slide, bg_rgb=(15, 28, 46)):
     fill.solid()
     fill.fore_color.rgb = RGBColor(*bg_rgb)
 
-def _make_dynamic_chart(msg, out_path):
+def _make_dynamic_chart(msg, research_data, out_path):
     try:
-        raw = ai_ask(msg, 'استخرج 5 مؤشرات رقمية واقعية مرتبطة بالموضوع بصيغة JSON فقط: {"title": "عنوان الرسم", "labels": ["أ", "ب", "ج", "د", "هـ"], "values": [85, 90, 78, 92, 88]}')
+        raw = ai_ask(f"الموضوع: {msg}\nالبيانات:\n{research_data}", 'استخرج 5 مؤشرات رقمية واقعية من البيانات بصيغة JSON فقط: {"title": "عنوان الرسم", "labels": ["أ", "ب", "ج", "د", "هـ"], "values": [85, 90, 78, 92, 88]}')
         d = json.loads(raw[raw.find("{"):raw.rfind("}")+1])
         ar_labels = [_ar_txt(l[:18]) for l in d["labels"][:5]]
         vals = d["values"][:5]
@@ -40,50 +42,59 @@ def _make_dynamic_chart(msg, out_path):
     except Exception: return False
 
 def make_ppt(cid, msg):
-    send_msg(cid, "⏳ وكيل التصميم يبني عرضاً تقديمياً فاخراً بهوية بصرية متكاملة...")
-    raw = ai_ask(msg, "صمم عرضاً تقديمياً احترافياً من 9 شرائح متكاملة. اكتب عنوان كل شريحة في سطر، وتحته 4 نقاط تفصيلية مركزة، وافصل بين كل شريحة وأخرى بسطر فارغ تماماً:")
+    send_msg(cid, "👥 *تفعيل غرفة عمليات العرض التقديمي:*\n1️⃣ وكيل البحث يجمع أحدث البيانات...\n2️⃣ وكيل البناء يصيغ الشرائح التنفيذية...\n3️⃣ وكيل الحوكمة يضبط الهوية البصرية...")
+    web = ""
+    try:
+        with DDGS() as dd: web = "\n".join([x.get("body", "") for x in dd.text(msg, max_results=3)])
+    except Exception: pass
+
+    clean_title = ai_ask(msg, "اكتب عنواناً رسمياً فخماً ومختصراً لهذا العرض التقديمي (من 4 إلى 7 كلمات فقط بدون أي مقدمات أو رموز):").replace('"', '').strip()[:65]
+    raw = ai_ask(
+        f"الموضوع: {clean_title}\nبيانات البحث:\n{web}",
+        "أنت وكيل البناء التنفيذي. أنشئ 8 شرائح احترافية عميقة المحتوى. افصل بين كل شريحة وأخرى بعلامة === فقط.\n"
+        "صيغة كل شريحة:\nعنوان الشريحة\nنقطة تفصيلية غنية بالمعلومات\nنقطة تفصيلية ثانية\nنقطة تفصيلية ثالثة\nنقطة تفصيلية رابعة\n"
+        "ممنوع كتابة مقدمات أو ترقيم الشرائح بـ (الشريحة 1)."
+    )
+
     prs = Presentation()
     prs.slide_width = Inches(13.333); prs.slide_height = Inches(7.5)
-    blank_layout = prs.slide_layouts[6]
+    blank = prs.slide_layouts[6]
 
-    s0 = prs.slides.add_slide(blank_layout)
+    s0 = prs.slides.add_slide(blank)
     _style_slide(s0, (10, 20, 36))
     tb = s0.shapes.add_textbox(Inches(1), Inches(2.5), Inches(11.3), Inches(2.5))
     tf0 = tb.text_frame; tf0.word_wrap = True
-    p0 = tf0.paragraphs[0]; p0.text = msg[:70]; p0.font.size = Pt(40); p0.font.bold = True; p0.font.color.rgb = RGBColor(255, 209, 102)
-    p1 = tf0.add_paragraph(); p1.text = f"\nدراسة وعرض تنفيذي متكامل | {today_dates()}"; p1.font.size = Pt(20); p1.font.color.rgb = RGBColor(200, 220, 240)
+    p0 = tf0.paragraphs[0]; p0.text = clean_title; p0.alignment = PP_ALIGN.CENTER; p0.font.size = Pt(42); p0.font.bold = True; p0.font.color.rgb = RGBColor(255, 209, 102)
+    p1 = tf0.add_paragraph(); p1.text = f"\nدراسة وتحليل تنفيذي | {today_dates()}"; p1.alignment = PP_ALIGN.CENTER; p1.font.size = Pt(20); p1.font.color.rgb = RGBColor(200, 220, 240)
 
-    for blk in [x.strip() for x in raw.split("\n\n") if x.strip()]:
-        lns = [l.strip().replace("**", "").lstrip("-*# ") for l in blk.split("\n") if l.strip()]
-        if lns:
-            sl = prs.slides.add_slide(blank_layout)
+    blocks = [b.strip() for b in raw.split("===") if len(b.strip()) > 15]
+    for blk in blocks[:9]:
+        lns = [l.strip().replace("**", "").lstrip("-*#▪•1234567890. ") for l in blk.split("\n") if len(l.strip()) > 3]
+        if len(lns) >= 2:
+            sl = prs.slides.add_slide(blank)
             _style_slide(sl, (15, 28, 46))
-            box = sl.shapes.add_textbox(Inches(0.8), Inches(0.6), Inches(11.7), Inches(6.2))
+            box = sl.shapes.add_textbox(Inches(0.9), Inches(0.7), Inches(11.5), Inches(6.0))
             tf = box.text_frame; tf.word_wrap = True
-            t = tf.paragraphs[0]; t.text = lns[0][:75]; t.font.size = Pt(28); t.font.bold = True; t.font.color.rgb = RGBColor(255, 209, 102)
-            for bullet in lns[1:6]:
-                p = tf.add_paragraph(); p.text = f"▪ {bullet}"; p.font.size = Pt(20); p.font.color.rgb = RGBColor(240, 244, 248); p.space_before = Pt(14)
+            t = tf.paragraphs[0]; t.text = lns[0][:75]; t.alignment = PP_ALIGN.RIGHT; t.font.size = Pt(30); t.font.bold = True; t.font.color.rgb = RGBColor(255, 209, 102)
+            for bullet in lns[1:5]:
+                p = tf.add_paragraph(); p.text = f"{bullet}  ▪"; p.alignment = PP_ALIGN.RIGHT; p.font.size = Pt(21); p.font.color.rgb = RGBColor(240, 244, 248); p.space_before = Pt(18)
 
     chart_img = "/tmp/dyn_chart.png"
-    if _make_dynamic_chart(msg, chart_img):
-        sc = prs.slides.add_slide(blank_layout)
+    if _make_dynamic_chart(clean_title, web, chart_img):
+        sc = prs.slides.add_slide(blank)
         _style_slide(sc, (15, 28, 46))
         sc.shapes.add_picture(chart_img, Inches(1.8), Inches(1.1), width=Inches(9.6))
         if os.path.exists(chart_img): os.remove(chart_img)
 
     path = "/tmp/Out.pptx"
     prs.save(path)
-    send_file(cid, path, "Executive_Presentation.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "📽️ العرض التقديمي الفاخر جاهز")
+    send_file(cid, path, "Executive_Presentation.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", f"📽️ تم إنجاز العرض عبر 3 وكلاء متخصصين: *{clean_title}*\n💡 هل تود تحويل هذا العرض إلى فيديو بصوت بشري أو تقرير Word مفصل؟")
     if os.path.exists(path): os.remove(path)
 
 def make_video(cid, msg):
-    send_msg(cid, "🎬 استوديو الإنتاج يجهز الفيديو بالصوت السعودي والتصميم البصري...")
+    send_msg(cid, "🎬 *غرفة إنتاج الفيديو:*\n1️⃣ وكيل البحث يجمع الحقائق...\n2️⃣ وكيل السيناريو يكتب المشاهد...\n3️⃣ استوديو الصوت والصورة يدمج المقطع...")
     script = ai_ask(msg, "اكتب سيناريو فيديو احترافي من 6 مشاهد متسلسلة. لكل مشهد اكتب سطراً واحداً بصيغة: العنوان | النص الصوتي المفصل (3 جمل كاملة باللغة العربية الفصحى):")
-    scenes = []
-    for l in script.split("\n"):
-        if "|" in l:
-            parts = [p.strip().replace("**", "") for p in l.split("|") if p.strip()]
-            if len(parts) >= 2: scenes.append((parts[0], parts[1]))
+    scenes = [tuple(p.strip().replace("**", "") for p in l.split("|") if p.strip())[:2] for l in script.split("\n") if "|" in l and len(l.split("|")) >= 2]
     if not scenes: scenes = [(msg[:35], script[:400])]
 
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
@@ -118,7 +129,7 @@ def make_video(cid, msg):
         for s in seg_files: f.write(f"file '{s}'\n")
     out_vid = "/tmp/Video_Out.mp4"
     subprocess.run([ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", list_file, "-c", "copy", out_vid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    if os.path.exists(out_vid): send_file(cid, out_vid, "Video_Presentation.mp4", "video/mp4", "🎬 الفيديو جاهز")
+    if os.path.exists(out_vid): send_file(cid, out_vid, "Video_Presentation.mp4", "video/mp4", "🎬 الفيديو الاحترافي جاهز")
     for f in temp_files + [out_vid]:
         if os.path.exists(f):
             try: os.remove(f)

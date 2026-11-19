@@ -25,21 +25,21 @@ def _plan_mission(msg):
 
 def _create_custom_board(cid, msg):
     prompt = (
-        f"صمم هيكل لوحة تحكم حية بناءً على طلب المستخدم بصيغة JSON فقط:\n"
-        f'{{"title": "عنوان اللوحة", "cols": ["العمود 1", "العمود 2", "العمود 3", "العمود 4"], '
-        f'"rows": [["بيان 1", "بيان 2", "بيان 3", "بيان 4"], ["بيان 1", "بيان 2", "بيان 3", "بيان 4"]]}}\n'
+        f"صمم هيكل نظام / لوحة تحكم حية متكاملة بناءً على طلب المستخدم بصيغة JSON فقط:\n"
+        f'{{"title": "عنوان النظام أو اللوحة", "cols": ["العمود 1", "العمود 2", "العمود 3", "العمود 4"], '
+        f'"rows": [["بيان تجريبي 1", "بيان 2", "بيان 3", "بيان 4"], ["بيان تجريبي 2", "بيان 2", "بيان 3", "بيان 4"]]}}\n'
         f"الطلب: {msg}"
     )
     res = ai_ask(prompt, "أخرج JSON صالح فقط باللغة العربية بدون أي نص إضافي.")
     try:
         data = json.loads(res[res.find("{"):res.rfind("}")+1])
     except Exception:
-        data = {"title": "لوحة التحكم المخصصة", "cols": ["الاسم", "الدور / القسم", "المهمة", "الحالة"], "rows": [["موظف 1", "الإدارة", "متابعة العمليات", "نشط"]]}
+        data = {"title": "لوحة التحكم الحية", "cols": ["البند / الاسم", "التفاصيل", "التصنيف", "الحالة"], "rows": [["سجل 1", "بيانات أولية", "عام", "نشط"]]}
     sb("POST", "self_learning_logs", {"user_role": cid, "task_type": "لوحة_حية_مخصصة", "lesson_learned": json.dumps(data, ensure_ascii=False)})
     saved = sb("GET", "self_learning_logs", q=f"?user_role=eq.{cid}&task_type=eq.لوحة_حية_مخصصة&order=id.desc&limit=1")
-    bid = saved[0]["id"] if saved else 1
+    bid = saved["id"] if saved else 1
     url = f"https://onrender.com{bid}"
-    send_msg(cid, f"📊 *تم بناء لوحة التحكم الحية بنجاح:*\n*{data.get('title')}*\n\nافتح الرابط للتعديل المباشر والإضافة والحذف:\n{url}")
+    send_msg(cid, f"📊 *تم بناء النظام / اللوحة الحية بنجاح:*\n*{data.get('title')}*\n\nافتح الرابط للتعديل المباشر والإضافة والحذف:\n{url}")
 
 def run_task(cid, msg, role, sname):
     print("MISSION START:", cid, msg[:25], flush=True)
@@ -55,8 +55,10 @@ def run_task(cid, msg, role, sname):
     if any(w in low for w in ("وكيل", "قسم")) and any(v in low for v in ("ابن", "أبن", "ابني", "أبني", "انشئ", "أنشئ", "سوي", "اعمل", "جديد")):
         propose_agent(cid, msg, sname); return
 
-    if any(k in low for k in ("رابط لوحة", "لوحة تحكم حية", "لوحه تحكم حيه", "لوحة موظفين", "لوحه موظفين", "لوحة قيادة حية")):
-        if any(w in low for w in ("الوكلاء", "النظام", "القيادة")):
+    is_build = any(v in low for v in ("انشئ", "أنشئ", "انشاء", "إنشاء", "سوي", "اعمل", "صمم", "ابن", "ابني", "رابط لوحة", "لوحة تحكم حية", "لوحه تحكم حيه", "لوحة موظفين", "لوحه موظفين"))
+    is_board_topic = any(t in low for t in ("لوحة", "لوحه", "موقع", "منصة", "منصه", "نظام", "بلاغات", "موظفين"))
+    if is_build and is_board_topic:
+        if any(w in low for w in ("الوكلاء", "القيادة")):
             url = f"https://onrender.com{cid}"
             send_msg(cid, f"⚡ *لوحة القيادة الحية للنظام جاهزة:*\n{url}")
         else:

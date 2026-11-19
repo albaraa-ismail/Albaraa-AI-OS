@@ -8,6 +8,8 @@ from agents.research_agent import ResearchAgent
 from memory_engine import get_context, save_memory
 from evolution_engine import propose_agent, approve_pending, manage_agents, add_reminder, backup_memory, self_evolve_and_research, periodic_analytics
 
+BASE_HOST = "albaraa-ai-os" + "." + "onrender.com"
+
 def _time_ctx():
     now = pendulum.now("Asia/Riyadh")
     h = Gregorian(now.year, now.month, now.day).to_hijri()
@@ -37,8 +39,8 @@ def _create_custom_board(cid, msg):
         data = {"title": "لوحة التحكم الحية", "cols": ["البند / الاسم", "التفاصيل", "التصنيف", "الحالة"], "rows": [["سجل 1", "بيانات أولية", "عام", "نشط"]]}
     sb("POST", "self_learning_logs", {"user_role": cid, "task_type": "لوحة_حية_مخصصة", "lesson_learned": json.dumps(data, ensure_ascii=False)})
     saved = sb("GET", "self_learning_logs", q=f"?user_role=eq.{cid}&task_type=eq.لوحة_حية_مخصصة&order=id.desc&limit=1")
-    bid = saved["id"] if saved else 1
-    url = f"https://onrender.com{bid}"
+    bid = saved[0]["id"] if saved else 1
+    url = "https://" + BASE_HOST + "/board/" + str(bid)
     send_msg(cid, f"📊 *تم بناء النظام / اللوحة الحية بنجاح:*\n*{data.get('title')}*\n\nافتح الرابط للتعديل المباشر والإضافة والحذف:\n{url}")
 
 def run_task(cid, msg, role, sname):
@@ -59,7 +61,7 @@ def run_task(cid, msg, role, sname):
     is_board_topic = any(t in low for t in ("لوحة", "لوحه", "موقع", "منصة", "منصه", "نظام", "بلاغات", "موظفين"))
     if is_build and is_board_topic:
         if any(w in low for w in ("الوكلاء", "القيادة")):
-            url = f"https://onrender.com{cid}"
+            url = "https://" + BASE_HOST + "/dashboard/" + str(cid)
             send_msg(cid, f"⚡ *لوحة القيادة الحية للنظام جاهزة:*\n{url}")
         else:
             _create_custom_board(cid, msg)

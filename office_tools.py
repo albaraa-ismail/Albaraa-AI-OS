@@ -179,9 +179,10 @@ def make_excel(cid, msg):
     for c_i, val in enumerate(tots, 1):
         c = ws_data.cell(tot_r, c_i, val); c.fill = f_slate; c.font = Font(color="FFFFFF", size=11, bold=True); c.alignment = aln_c; c.border = brd
 
-    widths = [14, 22, 20, 18, 15, 14, 14, 13, 18, 28]
-    for c_i, w in enumerate(widths, 1): ws_data.column_dimensions[get_column_letter(c_i)].width = w
-    for c in range(1, 14): ws_dash.column_dimensions[get_column_letter(c)].width = 14
+    for c_i in range(1, 11):
+        ws_data.column_dimensions[get_column_letter(c_i)].width = 26 if c_i in (2, 10) else (20 if c_i in (3, 4, 9) else 15)
+    for c in range(1, 14):
+        ws_dash.column_dimensions[get_column_letter(c)].width = 14
 
     ws_dash.merge_cells("B2:M3"); ws_dash["B2"] = f"لوحة القيادة التنفيذية: {title}"; ws_dash["B2"].fill = f_navy; ws_dash["B2"].font = Font(color="FFD166", size=18, bold=True); ws_dash["B2"].alignment = aln_c
     ws_dash.merge_cells("B4:M4"); ws_dash["B4"] = f"تاريخ الإصدار: {today_dates()}  |  بطاقة الأداء المتوازن والمؤشرات التشغيلية"; ws_dash["B4"].fill = f_slate; ws_dash["B4"].font = Font(color="FFFFFF", size=11); ws_dash["B4"].alignment = aln_c

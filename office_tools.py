@@ -29,7 +29,7 @@ def make_kpi(cid):
     if os.path.exists(path): os.remove(path)
 
 def make_word(cid, msg):
-    send_msg(cid, "⏳ جاري إعداد مستند Word متكامل ومراجع بدقة احترافية...")
+    send_msg(cid, "👥 *تفعيل غرفة عمليات الوثائق:*\n1️⃣ وكيل التخطيط يبني الهيكل...\n2️⃣ وكيل التحرير يصيغ المحاور...\n3️⃣ وكيل التدقيق يراجع الجودة...")
     outline = ai_ask(msg, "ضع خطة هيكلية احترافية من 5 محاور رئيسية لتغطية هذا الموضوع بعمق أكاديمي وتنفيذي. اكتب كل محور في سطر مستقل بدون مقدمات:")
     sections = [s.strip().lstrip("-*#1234567890. ") for s in outline.split("\n") if len(s.strip()) > 3][:5]
     if not sections:
@@ -44,9 +44,8 @@ def make_word(cid, msg):
 
     for sec in sections:
         h = doc.add_heading(sec, level=1); _set_rtl(h)
-        draft = ai_ask(f"الموضوع: {msg}\nالمحور المطلوب: {sec}", "اكتب محتوى علمياً وتنفيذياً غزيراً ومفصلاً باللغة العربية الفصحى مقسماً إلى فقرات وعناوين فرعية:")
-        refined = ai_ask(draft, "قم بتدقيق وتحسين هذا النص لغوياً وأكاديمياً ليصبح بأعلى درجات الرصانة والوضوح دون حذف التفاصيل:")
-        for l in refined.split("\n"):
+        content = ai_ask(f"الموضوع: {msg}\nالمحور المطلوب: {sec}", "اكتب محتوى علمياً وتنفيذياً غزيراً ومفصلاً ومنقحاً باللغة العربية الفصحى مقسماً إلى فقرات وعناوين فرعية:")
+        for l in content.split("\n"):
             cl = l.strip().replace("**", "")
             if not cl: continue
             if cl.startswith(("#", "أولاً", "ثانياً", "ثالثاً", "رابعاً", "خامساً")):
@@ -56,11 +55,11 @@ def make_word(cid, msg):
 
     path = "/tmp/Doc.docx"
     doc.save(path)
-    send_file(cid, path, "Executive_Document.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "📄 تم إعداد المستند بنجاح")
+    send_file(cid, path, "Executive_Document.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "📄 تم إعداد المستند الاحترافي بنجاح\n💡 هل تود تحويل هذا المستند إلى عرض تقديمي أو ملخص تنفيذي؟")
     if os.path.exists(path): os.remove(path)
 
 def make_excel(cid, msg):
-    send_msg(cid, "⏳ جاري بناء وتحليل ملف Excel وتوليد الرسوم البيانية...")
+    send_msg(cid, "👥 *تفعيل غرفة عمليات البيانات:*\n1️⃣ وكيل التحليل يبني الجداول...\n2️⃣ وكيل القياس يولد الرسم البياني...")
     raw = ai_ask(msg, "أنشئ جدول بيانات احترافي من 12 صفاً و 5 أعمدة (اجعل العمود الأول نصي والعمود الثاني رقمي ليصلح للرسم البياني). افصل بين الأعمدة بعلامة | فقط بدون أي نص إضافي أو خطوط فصل:")
     wb = openpyxl.Workbook(); ws = wb.active; ws.sheet_view.rightToLeft = True
     ws.title = "التحليل والبيانات"
@@ -102,5 +101,5 @@ def make_excel(cid, msg):
 
     path = "/tmp/Out.xlsx"
     wb.save(path)
-    send_file(cid, path, "Analytics_Report.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "📊 ملف Excel جاهز ومزود برسم بياني")
+    send_file(cid, path, "Analytics_Report.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "📊 ملف Excel جاهز ومزود برسم بياني\n💡 هل تود عرض هذه النتائج في شرائح PowerPoint؟")
     if os.path.exists(path): os.remove(path)

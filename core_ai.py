@@ -24,32 +24,29 @@ def sb(m, t, p=None, q=""):
 
 def ai_ask(p, s):
     clean_s = s + STRICT_POLICY
-    last_err = "لا توجد مفاتيح API مفعلة"
+    last_err = "لا توجد مفاتيح"
     if GROQ_KEY:
+        u_groq = "".join(["https:", "//", "://groq.com", "/openai/v1/chat/completions"])
         for gm in ("llama-3.3-70b-versatile", "llama-3.1-8b-instant", "gemma2-9b-it"):
             try:
-                r = requests.post("https://groq.com",
-                                  json={"model": gm, "messages": [{"role": "system", "content": clean_s}, {"role": "user", "content": p}]},
-                                  headers={"Authorization": f"Bearer {GROQ_KEY}"}, timeout=35)
+                r = requests.post(u_groq, json={"model": gm, "messages": [{"role": "system", "content": clean_s}, {"role": "user", "content": p}]}, headers={"Authorization": f"Bearer {GROQ_KEY}"}, timeout=35)
                 if r.status_code == 200:
                     return r.json()["choices"].pop(0)["message"]["content"].strip()
                 last_err = f"Groq({gm}): {r.status_code}"
                 print(last_err, r.text[:100])
                 if r.status_code == 429: time.sleep(2)
-            except Exception as e:
-                last_err = f"GroqEx: {str(e)[:40]}"
+            except Exception as e: last_err = f"GroqEx: {str(e)[:40]}"
     if GEM_KEY:
         for gem in ("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"):
             try:
-                u = f"https://googleapis.com{gem}:generateContent?key={GEM_KEY}"
-                r = requests.post(u, json={"contents": [{"parts": [{"text": f"{clean_s}\n\n{p}"}]}]}, timeout=55)
+                u_gem = "".join(["https:", "//", "://googleapis.com", "/v1beta/models/", gem, ":generateContent?key=", GEM_KEY])
+                r = requests.post(u_gem, json={"contents": [{"parts": [{"text": f"{clean_s}\n\n{p}"}]}]}, timeout=55)
                 if r.status_code == 200:
                     return r.json()["candidates"].pop(0)["content"]["parts"].pop(0)["text"].strip()
                 last_err = f"Gem({gem}): {r.status_code}"
                 print(last_err, r.text[:100])
                 if r.status_code == 429: time.sleep(2)
-            except Exception as e:
-                last_err = f"GemEx: {str(e)[:40]}"
+            except Exception as e: last_err = f"GemEx: {str(e)[:40]}"
     return f"⚠️ تعذر التوليد ({last_err})"
 
 def send_msg(c, t):

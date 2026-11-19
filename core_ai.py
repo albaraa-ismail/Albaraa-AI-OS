@@ -44,13 +44,15 @@ def sb(method: str, table: str, data=None, q: str = ""):
         "Content-Type": "application/json",
         "Prefer": "return=representation"
     }
-    try:
-        r = SESSION.request(method, url, headers=headers, json=data, timeout=15)
-        if r.status_code in (200, 201):
-            return r.json()
-    except Exception as e:
-        print(f"Supabase Err ({table}): {e}", flush=True)
+        for _ in range(2):
+        try:
+            r = requests.request(method, url, headers=headers, json=data, timeout=15)
+            if r.status_code in (200, 201):
+                return r.json()
+        except Exception as e:
+            print(f"Supabase Err ({table}): {e}", flush=True)
     return []
+
 
 def ai_ask(prompt: str, system_prompt: str = "", temperature: float = 0.3) -> str:
     """محرك الذكاء الاصطناعي متعدد النماذج مع التبديل التلقائي لمنع التوقف"""

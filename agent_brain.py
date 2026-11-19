@@ -23,7 +23,7 @@ def _plan_mission(msg):
     except Exception: return {"deliverable": "report", "search_query": msg[:40], "steps": ["تحليل الهدف", "جمع البيانات", "إصدار المخرج التنفيذي"]}
 
 def run_task(cid, msg, role, sname):
-    print("MISSION START:", cid, msg[:25])
+    print("MISSION START:", cid, msg[:25], flush=True)
     t0, low, dtype = time.time(), msg.lower(), "مخرج تنفيذي"
 
     if role == "admin" and any(k in low for k in ("موافق", "اعتماد", "اعتمد", "ثبت")): approve_pending(cid); return
@@ -36,14 +36,15 @@ def run_task(cid, msg, role, sname):
     if any(w in low for w in ("وكيل", "قسم")) and any(v in low for v in ("ابن", "أبن", "ابني", "أبني", "انشئ", "أنشئ", "سوي", "اعمل", "جديد")):
         propose_agent(cid, msg, sname); return
 
-    send_msg(cid, "🧭 *غرفة عمليات الوكلاء:* تم استلام الهدف، الوكيل القائد يحلل المتطلبات ويوزع المهام...")
+    send_msg(cid, "🧭 *غرفة عمليات الوكلاء:* تم استلام الهدف، جاري التوجيه الفوري...")
 
-    plan = _plan_mission(msg)
-    deliv = plan.get("deliverable", "report")
-    if any(k in low for k in ("فيديو", "فديو", "مقطع", "video")): deliv = "video"
-    elif any(k in low for k in ("عرض", "بوربوينت", "شرائح")): deliv = "ppt"
-    elif any(k in low for k in ("اكسل", "إكسل", "excel", "جدول", "لوحة تحكم")): deliv = "excel"
-    elif any(k in low for k in ("وورد", "word", "بحث", "تقرير رسمي")): deliv = "word"
+    if any(k in low for k in ("فيديو", "فديو", "مقطع", "video")): deliv, plan = "video", {}
+    elif any(k in low for k in ("عرض", "بوربوينت", "شرائح")): deliv, plan = "ppt", {}
+    elif any(k in low for k in ("اكسل", "إكسل", "excel", "جدول", "لوحة تحكم")): deliv, plan = "excel", {}
+    elif any(k in low for k in ("وورد", "word", "بحث", "تقرير رسمي")): deliv, plan = "word", {}
+    else:
+        plan = _plan_mission(msg)
+        deliv = plan.get("deliverable", "report")
 
     if deliv == "video": make_video(cid, msg); dtype = "Video"
     elif deliv == "word": make_word(cid, msg); dtype = "Word"

@@ -37,6 +37,11 @@ def run_task(cid, msg, role, sname):
     if any(w in low for w in ("وكيل", "قسم")) and any(v in low for v in ("ابن", "أبن", "ابني", "أبني", "انشئ", "أنشئ", "سوي", "اعمل", "جديد")):
         propose_agent(cid, msg, sname); return
 
+    if any(k in low for k in ("لوحة تحكم حية", "رابط لوحة", "لوحه تحكم حيه", "تعديل الوكلاء", "لوحة القيادة")):
+        url = f"https://onrender.com{cid}"
+        send_msg(cid, f"⚡ *لوحة التحكم الحية الشاملة جاهزة:*\nيمكنك تعديل الوكلاء، إضافة وكيل جديد، إدارة التذكيرات، ومتابعة الإحصائيات مباشرة من هنا:\n{url}")
+        return
+
     if any(k in low for k in ("رابط", "روابط", "موقع", "مواقع", "برنامج", "برامج", "تحميل")):
         send_msg(cid, ResearchAgent().search_links(msg)); return
 
@@ -80,4 +85,3 @@ def run_task(cid, msg, role, sname):
 
     growth = min(99, 85 + len(sb("GET", "telemetry_kpis", q=f"?user_id=eq.{cid}&limit=15")))
     sb("POST", "telemetry_kpis", {"user_id": cid, "user_role": role, "unit_used": "منظومة الوكلاء", "task_complexity": "متقدم", "response_time_sec": round(time.time() - t0, 2), "time_saved_min": 45, "user_growth_score": growth, "deliverable_type": dtype})
- 

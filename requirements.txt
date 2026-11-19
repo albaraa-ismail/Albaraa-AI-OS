@@ -45,3 +45,6 @@ pydub
 Pillow
 arabic-reshaper
 python-bidi
+moviepy
+imageio
+

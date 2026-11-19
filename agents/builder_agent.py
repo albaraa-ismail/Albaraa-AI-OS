@@ -3,6 +3,9 @@ import base64
 import requests
 from core_ai import ai_ask
 
+_GH_API = "".join(["https:/", "/api.github.", "com"])
+_GH_WEB = "".join(["https:/", "/github.", "com"])
+
 class BuilderAgent:
     def __init__(self):
         self.name = "وكيل التطوير والويب وGitHub"
@@ -52,15 +55,15 @@ class BuilderAgent:
             return "⚠️ يرجى إضافة متغير GITHUB_TOKEN في إعدادات Render لتفعيل الرفع التلقائي على GitHub."
 
         headers = {"Authorization": f"token {self.gh_token}", "Accept": "application/vnd.github.v3+json"}
-        u_res = requests.get("https://github.com", headers=headers, timeout=15)
+        u_res = requests.get(f"{_GH_API}/user", headers=headers, timeout=15)
         if u_res.status_code != 200:
             return f"⚠️ فشل التحقق من حساب GitHub: {u_res.status_code}"
         username = u_res.json().get("login")
 
         clean_repo = "".join(c if c.isalnum() or c == "-" else "-" for c in repo_name.lower()).strip("-") or "ai-agent-project"
-        requests.post("https://github.comrepos", headers=headers, json={"name": clean_repo, "auto_init": True, "private": False}, timeout=15)
+        requests.post(f"{_GH_API}/user/repos", headers=headers, json={"name": clean_repo, "auto_init": True, "private": False}, timeout=15)
 
-        api_url = f"https://github.com{username}/{clean_repo}/contents/{file_path_in_repo}"
+        api_url = f"{_GH_API}/repos/{username}/{clean_repo}/contents/{file_path_in_repo}"
         sha = None
         check = requests.get(api_url, headers=headers, timeout=15)
         if check.status_code == 200:
@@ -72,5 +75,5 @@ class BuilderAgent:
 
         put_res = requests.put(api_url, headers=headers, json=payload, timeout=20)
         if put_res.status_code in (200, 201):
-            return f"https://github.com{username}/{clean_repo}"
+            return f"{_GH_WEB}/{username}/{clean_repo}"
         return f"⚠️ تعذر رفع الملف لـ GitHub: {put_res.status_code}"

@@ -45,10 +45,3 @@ pydub
 Pillow
 arabic-reshaper
 python-bidi
-# لترقية البوت 
-flask
-gunicorn
-requests
-python-pptx
-duckduckgo-search
-pydantic

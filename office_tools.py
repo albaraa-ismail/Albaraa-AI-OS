@@ -1,4 +1,4 @@
-وهناimport os, gc, pendulum
+import os, gc, pendulum
 from hijridate import Gregorian
 from core_ai import sb, ai_ask, send_msg, send_file
 

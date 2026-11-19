@@ -52,16 +52,17 @@ def ai_ask(prompt: str, system_prompt: str = "", temperature: float = 0.3) -> st
     full_sys = (system_prompt + STRICT_POLICY).strip()
     safe_prompt = prompt[:28000]
 
+    # 1. محرك Gemini (النماذج المستقرة)
     if GEM_KEY:
-        for model in ("gemini-3.8-flash", "gemini-3.1-flash-lite-preview", "gemini-3-flash-preview"):
+        for model in ("gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"):
             try:
                 url = f"{GEMINI_BASE_URL}{model}:generateContent?key={GEM_KEY}"
                 payload = {
                     "systemInstruction": {"parts": [{"text": full_sys}]},
                     "contents": [{"parts": [{"text": safe_prompt}]}],
-                    "generationConfig": {"temperature": temperature}
+                    "generationConfig": {"temperature": temperature, "maxOutputTokens": 4096}
                 }
-                r = requests.post(url, json=payload, timeout=20)
+                r = requests.post(url, json=payload, timeout=40)
                 if r.status_code == 200:
                     data = r.json()
                     cand = next(iter(data.get("candidates") or []), {})
@@ -74,36 +75,32 @@ def ai_ask(prompt: str, system_prompt: str = "", temperature: float = 0.3) -> st
             except Exception as e:
                 print(f"❌ Gemini ({model}) Exc: {e}", flush=True)
 
-    if GROQ_KEY:
-        for g_model in ("llama-3.3-70b-versatile", "llama-3.1-8b-instant"):
-            try:
-                headers = {"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"}
-                payload = {
-                    "model": g_model,
-                    "messages": [{"role": "system", "content": full_sys}, {"role": "user", "content": safe_prompt}],
-                    "temperature": temperature
-                }
-                r = requests.post(_GROQ_URL, headers=headers, json=payload, timeout=25)
-                if r.status_code == 200:
-                    choice = next(iter(r.json().get("choices") or []), {})
-                    txt = choice.get("message", {}).get("content", "").strip()
-                    if txt:
-                        return txt
-                else:
-                    print(f"❌ Groq ({g_model}) [{r.status_code}]: {r.text[:200]}", flush=True)
-            except Exception as e:
-                print(f"❌ Groq ({g_model}) Exc: {e}", flush=True)
-
+    # 2. محرك OpenRouter (النماذج المجانية المحدثة + تحديد max_tokens لتجنب خطأ 402)
     if OR_KEY:
-        for or_model in ("google/gemini-3-flash-preview", "meta-llama/llama-3.3-70b-instruct:free", "qwen/qwen-2.5-72b-instruct:free"):
+        or_models = (
+            "openrouter/free",
+            "nvidia/nemotron-3-ultra-550b-a55b:free",
+            "google/gemma-4-31b-it:free",
+            "baidu/ernie-5.5-flash-preview:free"
+        )
+        for or_model in or_models:
             try:
-                headers = {"Authorization": f"Bearer {OR_KEY}", "Content-Type": "application/json"}
+                headers = {
+                    "Authorization": f"Bearer {OR_KEY}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://albaraa-ai-os.onrender.com",
+                    "X-Title": "Albaraa AI OS"
+                }
                 payload = {
                     "model": or_model,
-                    "messages": [{"role": "system", "content": full_sys}, {"role": "user", "content": safe_prompt}],
-                    "temperature": temperature
+                    "messages": [
+                        {"role": "system", "content": full_sys},
+                        {"role": "user", "content": safe_prompt}
+                    ],
+                    "temperature": temperature,
+                    "max_tokens": 4000
                 }
-                r = requests.post(_OR_URL, headers=headers, json=payload, timeout=35)
+                r = requests.post(_OR_URL, headers=headers, json=payload, timeout=45)
                 if r.status_code == 200:
                     choice = next(iter(r.json().get("choices") or []), {})
                     txt = choice.get("message", {}).get("content", "").strip()
@@ -113,6 +110,28 @@ def ai_ask(prompt: str, system_prompt: str = "", temperature: float = 0.3) -> st
                     print(f"❌ OpenRouter ({or_model}) [{r.status_code}]: {r.text[:200]}", flush=True)
             except Exception as e:
                 print(f"❌ OpenRouter ({or_model}) Exc: {e}", flush=True)
+
+    # 3. محرك Groq الاحتياطي
+    if GROQ_KEY:
+        for g_model in ("llama-3.3-70b-versatile", "llama-3.1-8b-instant"):
+            try:
+                headers = {"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"}
+                payload = {
+                    "model": g_model,
+                    "messages": [{"role": "system", "content": full_sys}, {"role": "user", "content": safe_prompt}],
+                    "temperature": temperature,
+                    "max_tokens": 4000
+                }
+                r = requests.post(_GROQ_URL, headers=headers, json=payload, timeout=30)
+                if r.status_code == 200:
+                    choice = next(iter(r.json().get("choices") or []), {})
+                    txt = choice.get("message", {}).get("content", "").strip()
+                    if txt:
+                        return txt
+                else:
+                    print(f"❌ Groq ({g_model}) [{r.status_code}]: {r.text[:200]}", flush=True)
+            except Exception as e:
+                print(f"❌ Groq ({g_model}) Exc: {e}", flush=True)
 
     return "⚠ تعذر الحصول على استجابة من محركات الذكاء الاصطناعي حالياً، يرجى المحاولة بعد قليل."
 

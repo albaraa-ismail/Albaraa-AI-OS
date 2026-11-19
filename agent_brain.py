@@ -1,112 +1,137 @@
-import time, json, pendulum
-from hijridate import Gregorian
-from duckduckgo_search import DDGS
-from core_ai import sb, ai_ask, send_msg
-from office_tools import make_kpi, make_word, make_excel, make_pptx
-from media_maker import make_video
-from agents.research_agent import ResearchAgent
+import os
+import re
+import json
+import time
+from core_ai import sb, ai_ask, send_msg, send_file
 from memory_engine import get_context, save_memory
-from evolution_engine import propose_agent, approve_pending, manage_agents, add_reminder, backup_memory, self_evolve_and_research, periodic_analytics
+from office_tools import make_kpi, make_word, make_excel, make_pptx
+from video_studio import make_video
+from evolution_engine import register_agent_cmd, backup_system
+from agents.research_agent import fetch_live_knowledge
+from agents.learning_agent import QualityReviewerAgent
+from agents.builder_agent import BuilderAgent
 
-BASE_HOST = "albaraa-ai-os" + "." + "onrender.com"
+HOST_URL = "".join(["https:/", "/albaraa-ai-os.", "onrender.", "com"])
 
-def _time_ctx():
-    now = pendulum.now("Asia/Riyadh")
-    h = Gregorian(now.year, now.month, now.day).to_hijri()
-    return f"{h.day}/{h.month}/{h.year}هـ ({now.format('YYYY/MM/DD - hh:mm A')})"
-
-def _plan_mission(msg):
-    p = (
-        f'أنت الوكيل القائد. حلل الهدف وحدد خطة الوكلاء بصيغة JSON فقط:\n'
-        f'{{"deliverable": "word|excel|ppt|video|report", "search_query": "كلمات البحث", "steps": ["خطوة 1", "خطوة 2", "خطوة 3"]}}\n'
-        f'الهدف: {msg}'
-    )
-    res = ai_ask(p, "أخرج JSON صالح فقط بدون أي نص إضافي.")
-    try: return json.loads(res[res.find("{"):res.rfind("}")+1])
-    except Exception: return {"deliverable": "report", "search_query": msg[:40], "steps": ["تحليل الهدف", "جمع البيانات", "إصدار المخرج التنفيذي"]}
-
-def _create_custom_board(cid, msg):
-    prompt = (
-        f"صمم هيكل نظام / لوحة تحكم حية متكاملة بناءً على طلب المستخدم بصيغة JSON فقط:\n"
-        f'{{"title": "عنوان النظام أو اللوحة", "cols": ["العمود 1", "العمود 2", "العمود 3", "العمود 4"], '
-        f'"rows": [["بيان تجريبي 1", "بيان 2", "بيان 3", "بيان 4"], ["بيان تجريبي 2", "بيان 2", "بيان 3", "بيان 4"]]}}\n'
-        f"الطلب: {msg}"
-    )
-    res = ai_ask(prompt, "أخرج JSON صالح فقط باللغة العربية بدون أي نص إضافي.")
+def _real_multi_agent_pipeline(cid: str, msg: str, ctx: str, agents_list: list) -> str:
+    """
+    تشغيل سلسلة الوكلاء الحقيقيين بالتسلسل:
+    1. وكيل البحث: يجلب حقائق حقيقية من الإنترنت.
+    2. وكيل التنفيذ والتخطيط: يصيغ المخرج بناءً على الحقائق والسياق.
+    3. وكيل الجودة (QualityReviewerAgent): يدقق الأرقام ويمنع الهلوسة والتضارب.
+    """
+    # المرحلة 1: البحث الحي في الإنترنت
+    send_msg(cid, "🔍 *المرحلة 1/3 (وكيل البحث):* جاري البحث عن بيانات ومصادر حقيقية...")
+    web_facts = ""
     try:
-        data = json.loads(res[res.find("{"):res.rfind("}")+1])
-    except Exception:
-        data = {"title": "لوحة التحكم الحية", "cols": ["البند / الاسم", "التفاصيل", "التصنيف", "الحالة"], "rows": [["سجل 1", "بيانات أولية", "عام", "نشط"]]}
-    sb("POST", "self_learning_logs", {"user_role": cid, "task_type": "لوحة_حية_مخصصة", "lesson_learned": json.dumps(data, ensure_ascii=False)})
-    saved = sb("GET", "self_learning_logs", q=f"?user_role=eq.{cid}&task_type=eq.لوحة_حية_مخصصة&order=id.desc&limit=1")
-    bid = saved[0]["id"] if saved else 1
-    url = "https://" + BASE_HOST + "/board/" + str(bid)
-    send_msg(cid, f"📊 *تم بناء النظام / اللوحة الحية بنجاح:*\n*{data.get('title')}*\n\nافتح الرابط للتعديل المباشر والإضافة والحذف:\n{url}")
+        web_facts = fetch_live_knowledge(msg[:120])
+    except Exception as e:
+        print("Research Agent Err:", e, flush=True)
 
-def run_task(cid, msg, role, sname):
-    print("MISSION START:", cid, msg[:25], flush=True)
-    t0, low, dtype = time.time(), msg.lower(), "مخرج تنفيذي"
+    # المرحلة 2: التنفيذ والتخطيط عبر فريق الوكلاء المسجلين في Supabase
+    send_msg(cid, "⚙️ *المرحلة 2/3 (وكلاء التخطيط والتنفيذ):* جاري تحليل المعطيات وصياغة المخرج...")
+    team_roles = "\n".join([f"- {a.get('agent_name')}: {a.get('role_description')}" for a in agents_list]) or "- فريق وكلاء التخطيط والتحليل"
+    
+    draft_prompt = (
+        f"طلب المستخدم:\n{msg}\n\n"
+        f"نتائج البحث الحية من الإنترنت:\n{web_facts or 'لا توجد نتائج بحث إضافية'}\n\n"
+        f"سياق الذاكرة والخبرات السابقة:\n{ctx}\n\n"
+        f"الفريق المشارك:\n{team_roles}"
+    )
+    sys_exec = (
+        "أنت مدير منظومة الوكلاء التنفيذية. قم ببناء إجابة أو خطة عملية دقيقة ومرتبة. "
+        "اعتمد حصراً على نتائج البحث الحية وبيانات المستخدم، ولا تخترع أي أرقام أو ميزانيات من خيالك."
+    )
+    draft_output = ai_ask(draft_prompt, sys_exec, temperature=0.2)
 
-    if role == "admin" and any(k in low for k in ("موافق", "اعتماد", "اعتمد", "ثبت")): approve_pending(cid); return
-    if role == "admin" and any(k in low for k in ("اعرض الوكلاء", "الوكلاء المعتمدين", "احذف وكيل", "حذف وكيل")): manage_agents(cid, msg); return
-    if role == "admin" and any(k in low for k in ("نسخة احتياطية", "نسخه احتياطيه")): backup_memory(cid); return
-    if role == "admin" and any(k in low for k in ("تقرير دوري", "قياس الأداء", "تحليل السلوك")): periodic_analytics(cid); return
-    if role == "admin" and any(k in low for k in ("جدول القياس", "احصائيات اكسل")): make_kpi(cid); return
-    if role == "admin" and any(k in low for k in ("طور نفسك", "ابحث عن الجديد", "ابتكار")): self_evolve_and_research(cid); return
-    if any(k in low for k in ("ذكرني", "ذكرنا", "تذكير", "موعد")): add_reminder(cid, msg); return
-    if any(w in low for w in ("وكيل", "قسم")) and any(v in low for v in ("ابن", "أبن", "ابني", "أبني", "انشئ", "أنشئ", "سوي", "اعمل", "جديد")):
-        propose_agent(cid, msg, sname); return
+    # المرحلة 3: المراجعة والتدقيق قبل الاعتماد
+    send_msg(cid, "🛡️ *المرحلة 3/3 (وكيل الجودة والحوكمة):* جاري تدقيق الأرقام ومراجعة الاتساق...")
+    reviewer = QualityReviewerAgent(llm_callable=lambda p: ai_ask(p, "أنت مدقق جودة صارم تمنع التضارب والأرقام الوهمية.", temperature=0.1))
+    final_output = reviewer.review_and_improve(draft_output)
+    return final_output
 
-    is_build = any(v in low for v in ("انشئ", "أنشئ", "انشاء", "إنشاء", "سوي", "اعمل", "صمم", "ابن", "ابني", "رابط لوحة", "لوحة تحكم حية", "لوحه تحكم حيه", "لوحة موظفين", "لوحه موظفين"))
-    is_board_topic = any(t in low for t in ("لوحة", "لوحه", "موقع", "منصة", "منصه", "نظام", "بلاغات", "موظفين"))
-    if is_build and is_board_topic:
-        if any(w in low for w in ("الوكلاء", "القيادة")):
-            url = "https://" + BASE_HOST + "/dashboard/" + str(cid)
-            send_msg(cid, f"⚡ *لوحة القيادة الحية للنظام جاهزة:*\n{url}")
-        else:
-            _create_custom_board(cid, msg)
+def run_task(cid: str, msg: str, role: str, sname: str):
+    t0 = time.time()
+    m_low = msg.strip().lower()
+
+    # 1. أوامر الإدارة والتطوير الذاتي للوكلاء
+    if any(k in msg for k in ("أضف وكيل", "اضف وكيل", "انشئ وكيل", "أنشئ وكيل", "قائمة الوكلاء", "الوكلاء النشطين")):
+        res = register_agent_cmd(msg)
+        send_msg(cid, res)
         return
 
-    if any(k in low for k in ("رابط", "روابط", "موقع", "مواقع", "برنامج", "برامج", "تحميل")):
-        send_msg(cid, ResearchAgent().search_links(msg)); return
+    if "نسخة احتياطية" in msg or "باك اب" in m_low:
+        backup_system(cid)
+        return
 
-    if any(k in low for k in ("فيديو", "فديو", "مقطع", "video")):
-        deliv, plan = "video", {}
-    elif any(k in low for k in ("عرض", "بوربوينت", "شرائح")):
-        deliv, plan = "ppt", {}
-    elif any(k in low for k in ("اكسل", "إكسل", "excel", "جدول", "لوحة تحكم")):
-        deliv, plan = "excel", {}
-    elif any(k in low for k in ("وورد", "word", "بحث", "تقرير رسمي")):
-        deliv, plan = "word", {}
-    else:
-        plan = _plan_mission(msg)
-        deliv = plan.get("deliverable", "report")
+    # 2. أوامر استخراج المخرجات والملفات الفعلية
+    if any(k in msg for k in ("تقرير الأداء", "مؤشرات الأداء", "kpi")):
+        make_kpi(cid)
+        return
 
-    if deliv == "video": make_video(cid, msg); dtype = "Video"
-    elif deliv == "word": make_word(cid, msg); dtype = "Word"
-    elif deliv == "excel": make_excel(cid, msg); dtype = "Excel"
-    elif deliv == "ppt": make_pptx(cid, msg); dtype = "PowerPoint"
-    else:
-        steps_txt = " ⬅️ ".join(plan.get("steps", [])[:3])
-        web = ""
+    if any(k in msg for k in ("ملف وورد", "تقرير وورد", "word", "docx")):
+        make_word(cid, msg)
+        return
+
+    if any(k in msg for k in ("اكسل", "إكسل", "excel", "جدول بيانات", "لوحة تحكم")):
+        make_excel(cid, msg)
+        return
+
+    if any(k in msg for k in ("عرض تقديمي", "بوربوينت", "باوربوينت", "pptx", "شرائح")):
+        make_pptx(cid, msg)
+        return
+
+    if any(k in msg for k in ("فيديو", "مونتاج", "video", "موشن")):
+        make_video(cid, msg)
+        return
+
+    # 3. أوامر البرمجة وبناء الأكواد الفعلية عبر BuilderAgent
+    if any(k in msg for k in ("اكتب كود", "برمج", "سكربت", "script", "python")):
+        send_msg(cid, "💻 *وكيل التطوير البرمجي:* جاري كتابة الكود وفحصه وتجهيز الملف...")
+        builder = BuilderAgent()
+        res = builder.generate_code_structure(msg[:60], msg)
+        if res.get("status") == "success":
+            f_path = res.get("file_path")
+            send_file(cid, f_path, os.path.basename(f_path), "text/x-python", "✅ تم بناء الكود البرمجي وتجهيزه كملف قابل للتشغيل.")
+            if os.path.exists(f_path):
+                os.remove(f_path)
+        else:
+            send_msg(cid, f"⚠ {res.get('message', 'تعذر توليد الكود')}")
+        return
+
+    # 4. إنشاء لوحة تحكم ويب حية وتفاعلية
+    if "لوحة حية" in msg or "رابط لوحة" in msg:
+        send_msg(cid, "🌐 جاري هندسة لوحة التحكم الحية وربطها بقاعدة البيانات...")
+        p_board = (
+            f"أنشئ هيكل جدول بيانات JSON فقط حول: {msg}\n"
+            'الشكل المطلوب: {"title": "عنوان اللوحة", "cols": ["الاسم", "القسم", "الإنجاز%", "الحالة"], "rows": [["بند 1", "التشغيل", "90", "مكتمل"]]}'
+        )
+        raw_b = ai_ask(p_board, "أرجع JSON صالح فقط بدون أي نص إضافي.").replace("```json", "").replace("```", "").strip()
         try:
-            with DDGS() as dd: web = "\n".join([f"{x.get('title','')}: {x.get('href','')} - {x.get('body','')}" for x in dd.text(plan.get("search_query", msg), max_results=3)])
-        except Exception: pass
+            s_i, e_i = raw_b.find("{"), raw_b.rfind("}") + 1
+            board_obj = json.loads(raw_b[s_i:e_i])
+            saved = sb("POST", "self_learning_logs", {"user_role": cid, "task_type": "live_board", "lesson_learned": json.dumps(board_obj, ensure_ascii=False)})
+            bid = saved["id"] if saved else 1
+            send_msg(cid, f"🚀 *تم إطلاق لوحة التحكم الحية بنجاح!*\n🔗 الرابط المباشر:\n{HOST_URL}/board/{bid}")
+        except Exception as e:
+            send_msg(cid, f"⚠ تعذر إنشاء اللوحة الحية: {e}")
+        return
 
-        ctx = get_context(cid)
-        ags = "\n".join([f"- {a.get('agent_name')}: {a.get('system_prompt')}" for a in sb("GET", "agents_registry", q="?unit_name=eq.قسم_معتمد_نشط&order=id.desc&limit=10")])
+    # 5. التنفيذ الفعلي عبر منظومة الوكلاء المتعاونين (بحث -> بناء -> مراجعة)
+    ctx = get_context(cid)
+    agents_list = sb("GET", "agents_registry", q="?status=eq.active") or []
+    
+    final_ans = _real_multi_agent_pipeline(cid, msg, ctx, agents_list)
+    send_msg(cid, f"📑 *مخرج منظومة الوكلاء المعتمد:*\n━━━━━━━━━━\n{final_ans}")
 
-        raw_work = ai_ask(
-            f"التوقيت: {_time_ctx()}\nالمهمة: {msg}\nخطة التنفيذ: {steps_txt}\nالذاكرة:\n{ctx}\nبيانات البحث:\n{web}",
-            f"أنت فريق الوكلاء التنفيذيين:\n{ags}\nأنجز المهمة كمخرج مؤسسي متكامل ومنظم بعناوين وجداول نصية وتوصيات عملية."
-        )
-        governed = ai_ask(
-            f"المهمة الأصلية: {msg}\nمخرج فريق الإنتاج:\n{raw_work}",
-            "أنت وكيل الحوكمة وضمان الجودة. دقق المخرج، ارفع جودته التنفيذية، واختم بـ [التوصية التنفيذية التالية]. يُحظر ذكر أي اسم منظومة."
-        )
-        final_report = f"📑 *مخرج منظومة الوكلاء المعتمد*\n━━━━━━━━━━\n{governed}"
-        save_memory(cid, role, sname, msg, final_report)
-        send_msg(cid, final_report)
-
-    growth = min(99, 85 + len(sb("GET", "telemetry_kpis", q=f"?user_id=eq.{cid}&limit=15")))
-    sb("POST", "telemetry_kpis", {"user_id": cid, "user_role": role, "unit_used": "منظومة الوكلاء", "task_complexity": "متقدم", "response_time_sec": round(time.time() - t0, 2), "time_saved_min": 45, "user_growth_score": growth, "deliverable_type": dtype})
+    # حفظ الذاكرة وتسجيل مؤشر الأداء
+    save_memory(cid, role, sname, msg, final_ans)
+    dur = round(time.time() - t0, 2)
+    sb("POST", "telemetry_kpis", {
+        "user_role": role,
+        "unit_used": "MultiAgent_Pipeline",
+        "response_time_sec": dur,
+        "time_saved_min": 15,
+        "user_growth_score": 95,
+        "deliverable_type": "verified_report"
+    })

@@ -23,27 +23,37 @@ def _real_multi_agent_pipeline(cid: str, msg: str, ctx: str, agents_list: list) 
         print("Research Agent Err:", e, flush=True)
 
     send_msg(cid, "⚙️ *المرحلة 2/3 (وكلاء التخطيط والتنفيذ):* جاري تحليل المعطيات وصياغة المخرج...")
+    learned_rules = evolution_engine.get_learned_rules()
     team_roles = "\n".join([f"- {a.get('agent_name')}: {a.get('role_description')}" for a in agents_list]) or "- فريق وكلاء التخطيط والتحليل"
     draft_prompt = f"طلب المستخدم:\n{msg}\n\nنتائج البحث الحية:\n{web_facts or 'لا توجد نتائج إضافية'}\n\nالسياق:\n{ctx}\n\nالفريق:\n{team_roles}"
-    sys_exec = "أنت مدير منظومة الوكلاء. ابنِ إجابة دقيقة ومرتبة بناءً على نتائج البحث وبيانات المستخدم فقط، ولا تخترع أي أرقام."
+    sys_exec = f"أنت مدير منظومة الوكلاء. ابنِ إجابة دقيقة ومرتبة بناءً على نتائج البحث وبيانات المستخدم فقط، ولا تخترع أي أرقام.{learned_rules}"
     draft_output = ai_ask(draft_prompt, sys_exec, temperature=0.2)
 
     send_msg(cid, "🛡️ *المرحلة 3/3 (وكيل الجودة والحوكمة):* جاري تدقيق الأرقام ومراجعة الاتساق...")
-    reviewer = QualityReviewerAgent(llm_callable=lambda p: ai_ask(p, "أنت مدقق جودة صارم تمنع التضارب والأرقام الوهمية.", temperature=0.1))
+    reviewer = QualityReviewerAgent(llm_callable=lambda p: ai_ask(p, f"أنت مدقق جودة صارم تمنع التضارب والأرقام الوهمية.{learned_rules}", temperature=0.1))
     return reviewer.review_and_improve(draft_output)
 
 def run_task(cid: str, msg: str, role: str, sname: str):
     t0 = time.time()
     m_low = msg.strip().lower()
 
-    if any(k in msg for k in ("أضف وكيل", "اضف وكيل", "انشئ وكيل", "أنشئ وكيل", "قائمة الوكلاء", "الوكلاء النشطين")):
-        send_msg(cid, evolution_engine.manage_agents(msg))
+    if any(msg.startswith(p) for p in ("ملاحظة:", "ملاحظة ", "تعديل:", "قاعدة:", "تغذية راجعة:")):
+        evolution_engine.save_user_feedback(cid, msg)
         return
 
+    if any(k in msg for k in ("تطوير ذاتي", "طور نفسك", "ابتكار", "تحديث القدرات")):
+        evolution_engine.self_evolve_and_research(cid)
+        return
+
+    if any(k in msg for k in ("تحليل التطور", "قياس التطور", "تقرير التعلم")):
+        evolution_engine.periodic_analytics(cid)
+        return
+
+    if any(k in msg for k in ("أضف وكيل", "اضف وكيل", "انشئ وكيل", "أنشئ وكيل", "قائمة الوكلاء", "الوكلاء النشطين", "احذف وكيل")):
+        send_msg(cid, evolution_engine.manage_agents(msg, cid))
+        return
     if "نسخة احتياطية" in msg or "باك اب" in m_low:
-        fn = getattr(evolution_engine, "export_backup", None) or getattr(evolution_engine, "backup_db", None)
-        if fn:
-            fn(cid)
+        evolution_engine.backup_memory(cid)
         return
 
     if any(k in msg for k in ("تقرير الأداء", "مؤشرات الأداء", "kpi")):
@@ -111,7 +121,7 @@ def run_task(cid: str, msg: str, role: str, sname: str):
         return
 
     ctx = get_context(cid)
-    agents_list = sb("GET", "agents_registry", q="?status=eq.active") or []
+    agents_list = sb("GET", "agents_registry", q="?unit_name=eq.قسم_معتمد_نشط") or []
     final_ans = _real_multi_agent_pipeline(cid, msg, ctx, agents_list)
     send_msg(cid, f"📑 *مخرج منظومة الوكلاء المعتمد:*\n━━━━━━━━━━\n{final_ans}")
     save_memory(cid, role, sname, msg, final_ans)

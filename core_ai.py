@@ -19,7 +19,7 @@ def sb(m, t, p=None, q=""):
         elif m == "PATCH": r = requests.patch(u, json=p, headers=h, timeout=12)
         else: r = requests.post(u, json=p, headers=h, timeout=12)
         if r.status_code in (200, 201, 204): return r.json() if r.text else []
-    except Exception as e: print("SB Err:", e)
+    except Exception as e: print("SB Err:", e, flush=True)
     return []
 
 def ai_ask(p, s):
@@ -46,12 +46,15 @@ def ai_ask(p, s):
 
 def send_msg(c, t):
     if t and G_URL:
-        try: requests.post(f"{G_URL}/waInstance{G_ID}/sendMessage/{G_TOK}", json={"chatId": c, "message": t}, timeout=15)
-        except Exception as e: print("Send Err:", e)
+        try:
+            r = requests.post(f"{G_URL}/waInstance{G_ID}/sendMessage/{G_TOK}", json={"chatId": c, "message": t}, timeout=15)
+            print(f"GREEN SEND [{r.status_code}]", flush=True)
+        except Exception as e: print("Send Err:", e, flush=True)
 
 def send_file(c, path, name, mime, cap):
     if G_URL and os.path.exists(path):
         try:
             with open(path, "rb") as f:
-                requests.post(f"{G_URL}/waInstance{G_ID}/sendFileByUpload/{G_TOK}", data={"chatId": c, "caption": cap}, files={"file": (name, f, mime)}, timeout=45)
-        except Exception as e: print("File Err:", e)
+                r = requests.post(f"{G_URL}/waInstance{G_ID}/sendFileByUpload/{G_TOK}", data={"chatId": c, "caption": cap}, files={"file": (name, f, mime)}, timeout=45)
+            print(f"GREEN FILE [{r.status_code}]", flush=True)
+        except Exception as e: print("File Err:", e, flush=True)

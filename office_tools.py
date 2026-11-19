@@ -79,7 +79,7 @@ def make_excel(cid, msg):
         "1: عنوان مؤسسي رسمي للتقرير (3 إلى 6 كلمات بدون أفعال أمر مثل عطني، صمم، اكتب).\n"
         "2: جدول بيانات من 13 صفاً (صف عناوين + 12 صف بيانات واقعية شاملة) بـ 6 أعمدة مفصولة بـ | فقط:\n"
         "الاسم أو البند | المسمى الوظيفي / التصنيف | الإدارة | المحقق الفعلي (رقم 72-115) | المستهدف (رقم 85-100) | الإجراء التطويري المقترح\n"
-        "3: ملخص تنفيذي من 3 توصيات استراتيجية للإدارة والموظفين.\n"
+        "3: ملخص تنفيذي من 3 توصيات استراتيجية للإدارة والموظفين بدون أي رموز نجمية.\n"
         "التزم بالفصل بـ === بدون أي مقدمات."
     )
     res = ai_ask(msg, prompt)
@@ -199,6 +199,9 @@ def make_excel(cid, msg):
         ws_dash[f"{cs}6"].value = tk; ws_dash[f"{cs}6"].fill = PatternFill(start_color=hx, end_color=hx, fill_type="solid"); ws_dash[f"{cs}6"].font = Font(color="FFFFFF", size=11, bold=True); ws_dash[f"{cs}6"].alignment = aln_c
         ws_dash[f"{cs}7"].value = fk; ws_dash[f"{cs}7"].fill = f_white; ws_dash[f"{cs}7"].font = Font(color=hx, size=18, bold=True); ws_dash[f"{cs}7"].alignment = aln_c; ws_dash[f"{cs}7"].border = brd
 
+    for r_idx in range(9, 27):
+        ws_dash.row_dimensions[r_idx].height = 20
+
     chart_img = "/tmp/dash_chart.png"
     try:
         fig, ax = plt.subplots(figsize=(10.5, 4.3), dpi=130)
@@ -216,22 +219,11 @@ def make_excel(cid, msg):
             ax.text(b.get_x() + b.get_width()/2, yv + 1, str(yv), ha='center', va='bottom', color='#00B4D8', fontsize=9, fontweight='bold')
         plt.tight_layout(); plt.savefig(chart_img, facecolor='#0B192C'); plt.close(fig)
         if os.path.exists(chart_img):
-            img_xl = XLImage(chart_img); img_xl.width = 840; img_xl.height = 345
+            img_xl = XLImage(chart_img); img_xl.width = 820; img_xl.height = 330
             ws_dash.add_image(img_xl, "B9")
     except Exception as e:
         print("Chart Img Err:", e, flush=True)
 
+    clean_sum = summary.replace("**", "").replace("###", "").replace("##", "").strip()
     ws_dash.merge_cells("B27:M27"); ws_dash["B27"] = "💡 القراءة التحليلية والتوصيات التنفيذية للإدارة"; ws_dash["B27"].fill = f_navy; ws_dash["B27"].font = Font(color="FFD166", size=12, bold=True); ws_dash["B27"].alignment = aln_r
-    ws_dash.merge_cells("B28:M32")
-    ws_dash["B28"] = summary
-    ws_dash["B28"].fill = f_zebra
-    ws_dash["B28"].font = Font(color="0F172A", size=11)
-    ws_dash["B28"].alignment = Alignment(horizontal="right", vertical="top", wrap_text=True)
-    ws_dash["B28"].border = brd
-
-    path = "/tmp/Dashboard.xlsx"
-    wb.save(path)
-    send_file(cid, path, "Executive_Dashboard.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"📊 *{title}*")
-    if os.path.exists(path): os.remove(path)
-    if os.path.exists(chart_img): os.remove(chart_img)
-    del wb; gc.collect()
+    ws_dash.row_dimensions.height = 28

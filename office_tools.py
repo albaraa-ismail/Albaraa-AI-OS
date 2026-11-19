@@ -1,83 +1,8 @@
-import os, gc, pendulum
-from hijridate import Gregorian
-from core_ai import sb, ai_ask, send_msg, send_file
-
-def today_dates():
-    now = pendulum.now("Asia/Riyadh")
-    hijri = Gregorian(now.year, now.month, now.day).to_hijri()
-    return f"{hijri.day}/{hijri.month}/{hijri.year}هـ - {now.format('YYYY/MM/DD')}م"
-
-def _clean_title(msg):
-    t = ai_ask(msg, "حول هذا الطلب إلى عنوان تقرير تنفيذي فخم من 3 إلى 6 كلمات بدون أي أفعال أمر مثل (عطني، صمم، اكتب، سوي، ابي). اكتب العنوان فقط بدون علامات تنصيص:").replace('"', '').strip()[:65]
-    if "تعذر" in t or len(t) < 4:
-        for w in ("عطني", "أعطني", "اعطني", "صمم", "اكتب", "سوي", "اعمل", "أريد", "ابي", "أبي", "لوحة تحكم"):
-            msg = msg.replace(w, "")
-        t = msg.strip()[:60] or "منظومة مؤشرات الأداء الاستراتيجية"
-    return t
-
-def _set_rtl(p):
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.oxml import OxmlElement
-    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    pPr = p._p.get_or_add_pPr()
-    pPr.append(OxmlElement('w:bidi'))
-
-def make_kpi(cid):
-    import openpyxl
-    wb = openpyxl.Workbook(); ws = wb.active; ws.sheet_view.rightToLeft = True
-    ws.append(["رقم العملية", "المستخدم", "القسم", "زمن التنفيذ(ث)", "الوقت الموفر(د)", "مؤشر التطور%", "المخرج"])
-    for i in sb("GET", "telemetry_kpis", q="?order=id.desc&limit=50"):
-        ws.append([i.get("id"), i.get("user_role"), i.get("unit_used"), i.get("response_time_sec"), i.get("time_saved_min"), i.get("user_growth_score"), i.get("deliverable_type")])
-    path = "/tmp/KPI.xlsx"
-    wb.save(path)
-    send_file(cid, path, "Performance_Report.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"📊 تقرير قياس الأداء ({today_dates()})")
-    if os.path.exists(path): os.remove(path)
-    del wb; gc.collect()
-
-def make_word(cid, msg):
-    from docx import Document
-    from docx.shared import Pt as DocPt
-    send_msg(cid, "👥 *تفعيل غرفة عمليات الوثائق:*\n1️⃣ وكيل التخطيط يبني الهيكل...\n2️⃣ وكيل التحرير يصيغ المحاور...\n3️⃣ وكيل التدقيق يراجع الجودة...")
-    formal_title = _clean_title(msg)
-    outline = ai_ask(msg, "ضع خطة هيكلية احترافية من 5 محاور رئيسية لتغطية هذا الموضوع بعمق أكاديمي وتنفيذي. اكتب كل محور في سطر مستقل بدون مقدمات:")
-    sections = []
-    for s in outline.split("\n"):
-        clean_s = s.strip().lstrip("-*#1234567890. ")
-        if len(clean_s) > 3 and len(sections) < 5:
-            sections.append(clean_s)
-    if not sections:
-        sections = ["المقدمة والإطار العام", "التحليل والمنهجية", "التطبيقات العملية", "مؤشرات الأداء والقياس", "النتائج والتوصيات"]
-
-    doc = Document()
-    doc.styles['Normal'].font.name = 'Arial'
-    doc.styles['Normal'].font.size = DocPt(14)
-
-    title_p = doc.add_heading(formal_title, 0); _set_rtl(title_p)
-    date_p = doc.add_paragraph(f"تاريخ الإصدار: {today_dates()}"); _set_rtl(date_p)
-
-    for sec in sections:
-        h = doc.add_heading(sec, level=1); _set_rtl(h)
-        content = ai_ask(f"الموضوع: {formal_title}\nالمحور المطلوب: {sec}", "اكتب محتوى علمياً وتنفيذياً غزيراً ومفصلاً ومنقحاً باللغة العربية الفصحى مقسماً إلى فقرات وعناوين فرعية:")
-        for l in content.split("\n"):
-            cl = l.strip().replace("**", "")
-            if not cl: continue
-            if cl.startswith(("#", "أولاً", "ثانياً", "ثالثاً", "رابعاً", "خامساً")):
-                sh = doc.add_heading(cl.lstrip("# "), level=2); _set_rtl(sh)
-            else:
-                p = doc.add_paragraph(cl); _set_rtl(p)
-
-    path = "/tmp/Doc.docx"
-    doc.save(path)
-    send_file(cid, path, "Executive_Document.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", f"📄 تم إعداد المستند الاحترافي: *{formal_title}*\n💡 هل تود تحويل هذا المستند إلى عرض تقديمي أو ملخص تنفيذي؟")
-    if os.path.exists(path): os.remove(path)
-    del doc; gc.collect()
-
 def make_excel(cid, msg):
     import openpyxl
     from openpyxl.utils import get_column_letter
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.chart import BarChart, PieChart, Reference
-    from openpyxl.formatting.rule import DataBarRule
 
     send_msg(cid, "👥 *هندسة لوحة القيادة التفاعلية:*\n1️⃣ بناء قاعدة البيانات والمعادلات الحية...\n2️⃣ تصميم واجهة المؤشرات والرسوم البيانية...")
     print("EXCEL STEP 1: Calling AI...", flush=True)
@@ -121,6 +46,9 @@ def make_excel(cid, msg):
     fill_bg = PatternFill(start_color=c_bg, end_color=c_bg, fill_type="solid")
     fill_white = PatternFill(start_color=c_white, end_color=c_white, fill_type="solid")
     fill_zebra = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+    fill_green = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
+    fill_blue = PatternFill(start_color="DBEAFE", end_color="DBEAFE", fill_type="solid")
+    fill_amber = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
 
     thin = Side(style='thin', color='CBD5E1')
     b_cell = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -171,6 +99,7 @@ def make_excel(cid, msg):
 
         act_v = raw_act if isinstance(raw_act, (int, float)) else 85
         tgt_v = raw_tgt if isinstance(raw_tgt, (int, float)) else 90
+        pct_num = round((act_v / max(tgt_v, 1)) * 100, 1)
 
         row_entries = [
             name_v,
@@ -186,9 +115,13 @@ def make_excel(cid, msg):
         for c_idx, val in enumerate(row_entries, start=1):
             cell = ws_data.cell(row=idx, column=c_idx, value=val)
             cell.border = b_cell
-            cell.font = Font(color="0F172A", size=11, bold=(c_idx in (1, 5)))
+            cell.font = Font(color="0F172A", size=11, bold=(c_idx in (1, 5, 7)))
             cell.alignment = Alignment(horizontal="center" if c_idx in (3, 4, 5, 6, 7) else "right", vertical="center")
             if idx % 2 == 0: cell.fill = fill_zebra
+            if c_idx == 7:
+                if pct_num >= 100: cell.fill = fill_green
+                elif pct_num >= 85: cell.fill = fill_blue
+                else: cell.fill = fill_amber
 
     tot_row = last_row + 1
     ws_data.row_dimensions[tot_row].height = 28
@@ -205,3 +138,81 @@ def make_excel(cid, msg):
     for c_idx, val in enumerate(tot_entries, start=1):
         cell = ws_data.cell(row=tot_row, column=c_idx, value=val)
         cell.fill = fill_slate
+        cell.font = Font(color=c_white, bold=True, size=11)
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = b_cell
+
+    for c_idx in range(1, 9):
+        col_ltr = get_column_letter(c_idx)
+        ws_data.column_dimensions[col_ltr].width = 24 if c_idx in (1, 8) else 18
+
+    for r in range(1, 36):
+        ws_dash.row_dimensions[r].height = 22
+        for c in range(1, 14):
+            ws_dash.cell(row=r, column=c).fill = fill_bg
+
+    for c in range(1, 14):
+        ws_dash.column_dimensions[get_column_letter(c)].width = 13
+
+    ws_dash.merge_cells("B2:M3")
+    ws_dash["B2"] = f"لوحة القيادة التنفيذية: {formal_title}"
+    ws_dash["B2"].font = Font(color=c_gold, bold=True, size=18)
+    ws_dash["B2"].fill = fill_navy
+    ws_dash["B2"].alignment = Alignment(horizontal="center", vertical="center")
+
+    ws_dash.merge_cells("B4:M4")
+    ws_dash["B4"] = f"تاريخ التحديث: {today_dates()}   |   لوحة مؤشرات تفاعلية مرتبطة بالبيانات الحية"
+    ws_dash["B4"].font = Font(color=c_white, size=11)
+    ws_dash["B4"].fill = fill_slate
+    ws_dash["B4"].alignment = Alignment(horizontal="center", vertical="center")
+
+    cards_spec = [
+        ("B", "D", "إجمالي المحقق الفعلي", f"='البيانات والتحليل'!C{tot_row}", c_card_1),
+        ("E", "G", "متوسط نسبة الإنجاز %", f"='البيانات والتحليل'!E{tot_row}", c_card_2),
+        ("H", "J", "صافي الفارق عن المستهدف", f"='البيانات والتحليل'!F{tot_row}", c_card_3),
+        ("K", "M", "أعلى قيمة مسجلة", f"=MAX('البيانات والتحليل'!C2:C{last_row})", c_card_4),
+    ]
+
+    ws_dash.row_dimensions.height = 24
+    ws_dash.row_dimensions.height = 38
+    for c_start, c_end, title_k, formula_k, hex_c in cards_spec:
+        ws_dash.merge_cells(f"{c_start}6:{c_end}6")
+        ws_dash.merge_cells(f"{c_start}7:{c_end}7")
+
+        top_c = ws_dash[f"{c_start}6"]
+        top_c.value = title_k
+        top_c.fill = PatternFill(start_color=hex_c, end_color=hex_c, fill_type="solid")
+        top_c.font = Font(color=c_white, bold=True, size=11)
+        top_c.alignment = Alignment(horizontal="center", vertical="center")
+
+        val_c = ws_dash[f"{c_start}7"]
+        val_c.value = formula_k
+        val_c.fill = fill_white
+        val_c.font = Font(color=hex_c, bold=True, size=18)
+        val_c.alignment = Alignment(horizontal="center", vertical="center")
+
+    bar_chart = BarChart()
+    bar_chart.type = "col"
+    bar_chart.style = 10
+    bar_chart.title = "مقارنة الأداء المحقق مقابل المستهدف"
+    bar_chart.y_axis.title = "القيمة"
+    bar_chart.width = 21
+    bar_chart.height = 11.5
+    data_ref = Reference(ws_data, min_col=3, max_col=4, min_row=1, max_row=last_row)
+    cats_ref = Reference(ws_data, min_col=1, min_row=2, max_row=last_row)
+    bar_chart.add_data(data_ref, titles_from_data=True)
+    bar_chart.set_categories(cats_ref)
+    ws_dash.add_chart(bar_chart, "B9")
+
+    pie_chart = PieChart()
+    pie_chart.title = "توزيع الحصص والأوزان النسبية"
+    pie_chart.style = 10
+    pie_chart.width = 14.5
+    pie_chart.height = 11.5
+    pie_data = Reference(ws_data, min_col=3, min_row=1, max_row=min(last_row, 9))
+    pie_cats = Reference(ws_data, min_col=1, min_row=2, max_row=min(last_row, 9))
+    pie_chart.add_data(pie_data, titles_from_data=True)
+    pie_chart.set_categories(pie_cats)
+    ws_dash.add_chart(pie_chart, "I9")
+
+    ws_dash.merge_cells("B27:M27")

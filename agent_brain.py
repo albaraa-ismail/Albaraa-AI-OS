@@ -37,8 +37,9 @@ def run_task(cid, msg, role, sname):
     if any(w in low for w in ("وكيل", "قسم")) and any(v in low for v in ("ابن", "أبن", "ابني", "أبني", "انشئ", "أنشئ", "سوي", "اعمل", "جديد")):
         propose_agent(cid, msg, sname); return
 
-        if any(k in low for k in ("رابط", "روابط", "موقع", "مواقع", "برنامج", "برامج", "تحميل")):
+    if any(k in low for k in ("رابط", "روابط", "موقع", "مواقع", "برنامج", "برامج", "تحميل")):
         send_msg(cid, ResearchAgent().search_links(msg)); return
+
     if any(k in low for k in ("فيديو", "فديو", "مقطع", "video")):
         deliv, plan = "video", {}
     elif any(k in low for k in ("عرض", "بوربوينت", "شرائح")):

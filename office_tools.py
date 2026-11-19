@@ -1,3 +1,69 @@
+import os, gc, pendulum
+from hijridate import Gregorian
+from core_ai import sb, ai_ask, send_msg, send_file
+
+def today_dates():
+    now = pendulum.now("Asia/Riyadh")
+    h = Gregorian(now.year, now.month, now.day).to_hijri()
+    return f"{h.day}/{h.month}/{h.year}هـ - {now.format('YYYY/MM/DD')}م"
+
+def _clean_title(msg):
+    t = ai_ask(msg, "حول الطلب إلى عنوان تقرير تنفيذي فخم من 3 إلى 6 كلمات بدون أفعال أمر (مثل عطني، صمم، اكتب). العنوان فقط:").replace('"', '').strip()[:60]
+    if "تعذر" in t or len(t) < 4:
+        for w in ("عطني", "أعطني", "اعطني", "صمم", "اكتب", "سوي", "اعمل", "أريد", "ابي", "أبي", "لوحة تحكم"):
+            msg = msg.replace(w, "")
+        t = msg.strip()[:55] or "لوحة المؤشرات التنفيذية"
+    return t
+
+def _set_rtl(p):
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    p._p.get_or_add_pPr().append(OxmlElement('w:bidi'))
+
+def make_kpi(cid):
+    import openpyxl
+    wb = openpyxl.Workbook(); ws = wb.active; ws.sheet_view.rightToLeft = True
+    ws.append(["رقم العملية", "المستخدم", "القسم", "زمن التنفيذ(ث)", "الوقت الموفر(د)", "مؤشر التطور%", "المخرج"])
+    for i in sb("GET", "telemetry_kpis", q="?order=id.desc&limit=50"):
+        ws.append([i.get("id"), i.get("user_role"), i.get("unit_used"), i.get("response_time_sec"), i.get("time_saved_min"), i.get("user_growth_score"), i.get("deliverable_type")])
+    path = "/tmp/KPI.xlsx"; wb.save(path)
+    send_file(cid, path, "Performance_Report.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"📊 تقرير قياس الأداء ({today_dates()})")
+    if os.path.exists(path): os.remove(path)
+    del wb; gc.collect()
+
+def make_word(cid, msg):
+    from docx import Document
+    from docx.shared import Pt as DocPt
+    send_msg(cid, "👥 *تفعيل غرفة عمليات الوثائق:* جاري بناء الهيكل وتحرير المحاور التنفيذية...")
+    title = _clean_title(msg)
+    outline = ai_ask(msg, "ضع 5 محاور رئيسية لتغطية هذا الموضوع بعمق تنفيذي. اكتب كل محور في سطر مستقل بدون مقدمات:")
+    sections = []
+    for s in outline.split("\n"):
+        cs = s.strip().lstrip("-*#1234567890. ")
+        if len(cs) > 3 and len(sections) < 5: sections.append(cs)
+    if not sections:
+        sections = ["الإطار العام", "التحليل والمنهجية", "التطبيقات العملية", "مؤشرات القياس", "التوصيات"]
+
+    doc = Document()
+    doc.styles['Normal'].font.name = 'Arial'; doc.styles['Normal'].font.size = DocPt(14)
+    _set_rtl(doc.add_heading(title, 0))
+    _set_rtl(doc.add_paragraph(f"تاريخ الإصدار: {today_dates()}"))
+
+    for sec in sections:
+        _set_rtl(doc.add_heading(sec, level=1))
+        content = ai_ask(f"الموضوع: {title}\nالمحور: {sec}", "اكتب محتوى تنفيذياً غزيراً ومفصلاً باللغة العربية الفصحى مقسماً إلى فقرات وعناوين فرعية:")
+        for l in content.split("\n"):
+            cl = l.strip().replace("**", "")
+            if not cl: continue
+            if cl.startswith(("#", "أولاً", "ثانياً", "ثالثاً", "رابعاً", "خامساً")): _set_rtl(doc.add_heading(cl.lstrip("# "), level=2))
+            else: _set_rtl(doc.add_paragraph(cl))
+
+    path = "/tmp/Doc.docx"; doc.save(path)
+    send_file(cid, path, "Executive_Document.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", f"📄 تم إعداد المستند الاحترافي: *{title}*")
+    if os.path.exists(path): os.remove(path)
+    del doc; gc.collect()
+
 def make_excel(cid, msg):
     import openpyxl
     from openpyxl.utils import get_column_letter
@@ -97,20 +163,3 @@ def make_excel(cid, msg):
     ws_dash.row_dimensions.height = 24; ws_dash.row_dimensions.height = 38
     for cs, ce, tk, fk, hx in cards:
         ws_dash.merge_cells(f"{cs}6:{ce}6"); ws_dash.merge_cells(f"{cs}7:{ce}7")
-        ws_dash[f"{cs}6"].value = tk; ws_dash[f"{cs}6"].fill = PatternFill(start_color=hx, end_color=hx, fill_type="solid"); ws_dash[f"{cs}6"].font = Font(color="FFFFFF", size=11, bold=True); ws_dash[f"{cs}6"].alignment = aln_c
-        ws_dash[f"{cs}7"].value = fk; ws_dash[f"{cs}7"].fill = f_white; ws_dash[f"{cs}7"].font = Font(color=hx, size=18, bold=True); ws_dash[f"{cs}7"].alignment = aln_c; ws_dash[f"{cs}7"].border = brd
-
-    bc = BarChart(); bc.type = "col"; bc.style = 10; bc.title = "مقارنة الأداء المحقق مقابل المستهدف"; bc.width = 28; bc.height = 12
-    bc.add_data(Reference(ws_data, min_col=3, max_col=4, min_row=1, max_row=last_r), titles_from_data=True)
-    bc.set_categories(Reference(ws_data, min_col=1, min_row=2, max_row=last_r))
-    ws_dash.add_chart(bc, "B9")
-
-    ws_dash.merge_cells("B26:M26"); ws_dash["B26"] = "💡 القراءة التحليلية والتوصيات التنفيذية"; ws_dash["B26"].fill = f_navy; ws_dash["B26"].font = Font(color="FFD166", size=12, bold=True); ws_dash["B26"].alignment = aln_r
-    ws_dash.merge_cells("B27:M32"); ws_dash["B27"] = summary.replace("**", ""); ws_dash["B27"].fill = f_white; ws_dash["B27"].font = Font(color="1E293B", size=11); ws_dash["B27"].alignment = Alignment(horizontal="right", vertical="top", wrap_text=True); ws_dash["B27"].border = brd
-
-    print("EXCEL 4: Saving...", flush=True)
-    path = "/tmp/Executive_Dashboard.xlsx"; wb.save(path)
-    print("EXCEL 5: Sending...", flush=True)
-    send_file(cid, path, "Executive_Dashboard.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"📊 تم إعداد لوحة القيادة التفاعلية: *{title}*\n✨ تشمل واجهة قيادة بصرية + ورقة بيانات بمعادلات تلقائية وتقييم آلي.")
-    if os.path.exists(path): os.remove(path)
-    del wb; gc.collect()

@@ -29,10 +29,11 @@ def _make_dynamic_chart(msg, research_data, out_path):
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
 
-        raw = ai_ask(f"الموضوع: {msg}\nالبيانات:\n{research_data}", 'استخرج 5 مؤشرات رقمية واقعية من البيانات بصيغة JSON فقط: {"title": "عنوان الرسم", "labels": ["أ", "ب", "ج", "د", "هـ"], "values": [85, 90, 78, 92, 88]}')
+        prompt_json = 'استخرج 5 مؤشرات رقمية واقعية من البيانات بصيغة JSON فقط: {"title": "عنوان الرسم", "labels": ["أ", "ب", "ج", "د", "هـ"], "values": [85, 90, 78, 92, 88]}'
+        raw = ai_ask(f"الموضوع: {msg}\nالبيانات:\n{research_data}", prompt_json)
         d = json.loads(raw[raw.find("{"):raw.rfind("}")+1])
-        ar_labels = [_ar_txt(l[:18]) for l in d["labels"][:5]]
-        vals = d["values"][:5]
+        ar_labels = [_ar_txt(l[:18]) for l in d.get("labels", [])[:5]]
+        vals = d.get("values", [])[:5]
 
         fig, ax = plt.subplots(figsize=(9.5, 5), dpi=150)
         fig.patch.set_facecolor('#0F1C2E')

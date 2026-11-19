@@ -1,4 +1,4 @@
-import os, threading
+import os, json, threading
 from flask import Flask, request, jsonify, render_template_string
 from agent_brain import run_task
 from safe_guard import safe_run
@@ -11,6 +11,74 @@ start_scheduler()
 SEEN = set()
 ADMIN_PHONE = os.environ.get("ADMIN_PHONE", "966575475336").strip()
 ALLOWED_GROUPS = [g.strip() for g in os.environ.get("ALLOWED_GROUP", "120363413772983962@g.us").split(",") if "@g.us" in g]
+
+CUSTOM_BOARD_HTML = """
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ board.title }}</title>
+<style>
+  body { font-family: Tahoma, sans-serif; background: #0f172a; color: #f8fafc; padding: 15px; margin: 0; }
+  .header { background: #1e293b; padding: 20px; border-radius: 12px; border: 1px solid #334155; margin-bottom: 20px; }
+  .card { background: #1e293b; padding: 18px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #334155; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; min-width: 500px; }
+  th, td { border: 1px solid #334155; padding: 10px; text-align: right; }
+  th { background: #0f172a; color: #10b981; }
+  input { width: 92%; background: #0f172a; color: #fff; border: 1px solid #475569; padding: 8px; border-radius: 6px; }
+  .btn { background: #10b981; color: #fff; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-weight: bold; }
+  .btn-del { background: #ef4444; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h2>📊 {{ board.title }}</h2>
+  <p style="color:#94a3b8; margin:0;">لوحة حية تفاعلية — عدّل أي خانة واضغط حفظ للتحديث الفوري.</p>
+</div>
+
+<div class="card">
+  <h3>➕ إضافة سجل جديد</h3>
+  <form method="POST">
+    <input type="hidden" name="action" value="add_row">
+    <table>
+      <tr>
+        {% for c in board.cols %}
+        <td><input type="text" name="col_{{ loop.index0 }}" placeholder="{{ c }}" required></td>
+        {% endfor %}
+        <td><button type="submit" class="btn">إضافة</button></td>
+      </tr>
+    </table>
+  </form>
+</div>
+
+<div class="card">
+  <h3>📋 البيانات الحية</h3>
+  <table>
+    <tr>
+      {% for c in board.cols %}<th>{{ c }}</th>{% endfor %}
+      <th>تحكم</th>
+    </tr>
+    {% for r in board.rows %}
+    {% set r_idx = loop.index0 %}
+    <tr>
+      <form method="POST">
+        <input type="hidden" name="row_idx" value="{{ r_idx }}">
+        {% for cell in r %}
+        <td><input type="text" name="col_{{ loop.index0 }}" value="{{ cell }}"></td>
+        {% endfor %}
+        <td>
+          <button type="submit" name="action" value="save_row" class="btn">حفظ</button>
+          <button type="submit" name="action" value="del_row" class="btn btn-del">حذف</button>
+        </td>
+      </form>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+</body>
+</html>
+"""
 
 FULL_DASHBOARD_HTML = """
 <!DOCTYPE html>
@@ -50,19 +118,16 @@ FULL_DASHBOARD_HTML = """
 </script>
 </head>
 <body>
-
 <div class="header">
   <h2>⚡ لوحة القيادة الحية (تحكم مباشر)</h2>
   <p style="color:#94a3b8; margin:0;">جميع التعديلات هنا تُحفظ فوراً وتنعكس مباشرة على عمل البوت في واتساب.</p>
 </div>
-
 <div class="stats">
   <div class="stat-box"><div class="stat-num">{{ active_count }}</div><div>الوكلاء النشطون</div></div>
   <div class="stat-box"><div class="stat-num">{{ kpis|length }}</div><div>المهام المنفذة</div></div>
   <div class="stat-box"><div class="stat-num">{{ avg_sec }} ث</div><div>متوسط الاستجابة</div></div>
   <div class="stat-box"><div class="stat-num">{{ total_saved }} د</div><div>الوقت الموفّر</div></div>
 </div>
-
 <div class="tabs">
   <button class="tab-btn active" onclick="showTab('agents-tab', this)">🤖 الوكلاء والأقسام</button>
   <button class="tab-btn" onclick="showTab('reminders-tab', this)">⏰ التذكيرات النشطة</button>
@@ -79,6 +144,7 @@ FULL_DASHBOARD_HTML = """
       <button type="submit" class="btn">إضافة وتفعيل الوكيل</button>
     </form>
   </div>
+
   <div class="card">
     <h3>✏️ إدارة وتعديل الوكلاء</h3>
     <table>
@@ -114,8 +180,8 @@ FULL_DASHBOARD_HTML = """
       {% for rem in reminders %}
       {% set parts = (rem.lesson_learned or '|').split('|', 1) %}
       <tr>
-        <td>{{ parts[0] }}</td>
-        <td>{{ parts[1] if parts|length > 1 else rem.lesson_learned }}</td>
+        <td>{{ parts }}</td>
+        <td>{{ parts if parts|length > 1 else rem.lesson_learned }}</td>
         <td>
           <form method="POST" style="margin:0;">
             <input type="hidden" name="action" value="del_reminder">
@@ -144,10 +210,31 @@ FULL_DASHBOARD_HTML = """
     </table>
   </div>
 </div>
-
 </body>
 </html>
 """
+
+@app.route("/board/<int:bid>", methods=["GET", "POST"])
+def custom_board(bid):
+    rows_db = sb("GET", "self_learning_logs", q=f"?id=eq.{bid}") or []
+    if not rows_db: return "اللوحة غير موجودة", 404
+    board = json.loads(rows_db[0].get("lesson_learned", "{}"))
+    if request.method == "POST":
+        act = request.form.get("action")
+        cols_len = len(board.get("cols", []))
+        if act == "add_row":
+            new_r = [request.form.get(f"col_{i}", "") for i in range(cols_len)]
+            board.setdefault("rows", []).append(new_r)
+        elif act == "save_row":
+            idx = int(request.form.get("row_idx", 0))
+            if 0 <= idx < len(board.get("rows", [])):
+                board["rows"][idx] = [request.form.get(f"col_{i}", "") for i in range(cols_len)]
+        elif act == "del_row":
+            idx = int(request.form.get("row_idx", 0))
+            if 0 <= idx < len(board.get("rows", [])):
+                board["rows"].pop(idx)
+        sb("PATCH", "self_learning_logs", {"lesson_learned": json.dumps(board, ensure_ascii=False)}, q=f"?id=eq.{bid}")
+    return render_template_string(CUSTOM_BOARD_HTML, board=board)
 
 @app.route("/dashboard/<cid>", methods=["GET", "POST"])
 def live_dashboard(cid):
@@ -155,21 +242,13 @@ def live_dashboard(cid):
         act = request.form.get("action")
         item_id = request.form.get("id")
         if act == "edit_agent":
-            sb("PATCH", "agents_registry", {
-                "agent_name": request.form.get("agent_name"),
-                "system_prompt": request.form.get("system_prompt")
-            }, q=f"?id=eq.{item_id}")
+            sb("PATCH", "agents_registry", {"agent_name": request.form.get("agent_name"), "system_prompt": request.form.get("system_prompt")}, q=f"?id=eq.{item_id}")
         elif act == "approve_agent":
             sb("PATCH", "agents_registry", {"unit_name": "قسم_معتمد_نشط"}, q=f"?id=eq.{item_id}")
         elif act == "del_agent":
             sb("PATCH", "agents_registry", {"unit_name": "محذوف"}, q=f"?id=eq.{item_id}")
         elif act == "add_agent":
-            sb("POST", "agents_registry", {
-                "unit_name": "قسم_معتمد_نشط",
-                "agent_name": request.form.get("agent_name"),
-                "sub_agents": "Admin Dashboard",
-                "system_prompt": request.form.get("system_prompt")
-            })
+            sb("POST", "agents_registry", {"unit_name": "قسم_معتمد_نشط", "agent_name": request.form.get("agent_name"), "sub_agents": "Admin Dashboard", "system_prompt": request.form.get("system_prompt")})
         elif act == "del_reminder":
             sb("DELETE", "self_learning_logs", q=f"?id=eq.{item_id}")
 
@@ -177,16 +256,9 @@ def live_dashboard(cid):
     active_count = sum(1 for a in agents if a.get("unit_name") == "قسم_معتمد_نشط")
     kpis = sb("GET", "telemetry_kpis", q="?order=id.desc&limit=20") or []
     reminders = sb("GET", "self_learning_logs", q=f"?user_role=eq.{cid}&task_type=eq.تذكير_نشط&order=id.desc&limit=20") or []
-
     avg_sec = round(sum(float(x.get("response_time_sec", 0)) for x in kpis) / len(kpis), 1) if kpis else 0
     total_saved = sum(int(x.get("time_saved_min", 0)) for x in kpis)
-
-    return render_template_string(
-        FULL_DASHBOARD_HTML,
-        agents=agents, active_count=active_count,
-        kpis=kpis, reminders=reminders,
-        avg_sec=avg_sec, total_saved=total_saved
-    )
+    return render_template_string(FULL_DASHBOARD_HTML, agents=agents, active_count=active_count, kpis=kpis, reminders=reminders, avg_sec=avg_sec, total_saved=total_saved)
 
 def process_incoming(cid, msg, m_url, m_mime, role, sname):
     final_msg = analyze_media(m_url, m_mime, msg) if m_url else msg

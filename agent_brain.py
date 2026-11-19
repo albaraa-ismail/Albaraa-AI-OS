@@ -6,7 +6,7 @@ from core_ai import sb, ai_ask, ai_ask_json, send_msg, send_file
 from memory_engine import get_context, save_memory
 from office_tools import make_kpi, make_word, make_excel, make_pptx, make_powerbi_kit
 from video_studio import make_video
-import agents.research_agent as research_agent
+from agents.research_agent import ResearchAgent
 from agents.learning_agent import QualityReviewerAgent
 from agents.builder_agent import BuilderAgent
 from agents.chief_agent import ChiefOrchestrator
@@ -17,9 +17,8 @@ def _real_multi_agent_pipeline(cid: str, msg: str, ctx: str, agents_list: list) 
     send_msg(cid, "🔍 *المرحلة 1/3 (وكيل البحث):* جاري البحث عن بيانات ومصادر حقيقية...")
     web_facts = ""
     try:
-        fn_r = getattr(research_agent, "fetch_live_knowledge", None) or getattr(research_agent, "search_web", None) or getattr(research_agent, "research_topic", None)
-        if fn_r:
-            web_facts = fn_r(msg[:120])
+        researcher = ResearchAgent()
+        web_facts = researcher.search_links(msg[:120])
     except Exception as e:
         print("Research Agent Err:", e, flush=True)
 
@@ -80,6 +79,7 @@ def run_task(cid: str, msg: str, role: str, sname: str):
     last_code_content = ""
     last_code_filename = "index.html"
     builder = BuilderAgent()
+    researcher = ResearchAgent()
 
     for idx, step in enumerate(steps, 1):
         tool = step.get("tool", "multi_agent_report")
@@ -88,10 +88,8 @@ def run_task(cid: str, msg: str, role: str, sname: str):
 
         if tool == "web_search":
             send_msg(cid, f"🔍 *المرحلة {idx}/{len(steps)} (وكيل البحث):* جاري جمع البيانات الحية...")
-            fn_r = getattr(research_agent, "fetch_live_knowledge", None) or getattr(research_agent, "search_web", None) or getattr(research_agent, "research_topic", None)
-            if fn_r:
-                res_web = fn_r(task_desc[:120])
-                shared_scratchpad += f"\n- نتائج البحث:\n{res_web}\n"
+            res_web = researcher.search_links(task_desc[:120])
+            shared_scratchpad += f"\n- نتائج البحث:\n{res_web}\n"
 
         elif tool == "live_board":
             send_msg(cid, f"🌐 *المرحلة {idx}/{len(steps)} (وكيل Power BI الحي):* جاري بناء اللوحة التفاعلية...")

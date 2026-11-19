@@ -79,12 +79,14 @@ def run_task(cid: str, msg: str, role: str, sname: str):
 
     if "لوحة حية" in msg or "رابط لوحة" in msg:
         send_msg(cid, "🌐 جاري هندسة لوحة التحكم الحية وربطها بقاعدة البيانات...")
-        p_board = f"أنشئ هيكل جدول JSON فقط حول: {msg}\n" + '{"title": "عنوان اللوحة", "cols": ["الاسم", "القسم", "الإنجاز%", "الحالة"], "rows": [["بند 1", "التشغيل", "90", "مكتمل"]]}'
-        raw_b = ai_ask(p_board, "أرجع JSON صالح فقط.").replace("```json", "").replace("```", "").strip()
+        board_obj = {"title": "لوحة متابعة أداء الموظفين الحية", "cols": ["اسم الموظف", "القسم", "المسمى الوظيفي", "الإنجاز%", "الحالة"], "rows": [["أحمد محمد", "المبيعات", "مشرف مبيعات", "92", "متميز"], ["سارة علي", "التشغيل", "أخصائي جودة", "85", "جيد جداً"]]}
+        p_board = f"أنشئ هيكل جدول JSON فقط حول: {msg}\n" + json.dumps(board_obj, ensure_ascii=False)
+        raw_b = ai_ask(p_board, "أرجع JSON صالح فقط.")
         try:
-            board_obj = json.loads(raw_b[raw_b.find("{"):raw_b.rfind("}") + 1])
+            if "{" in raw_b and "}" in raw_b:
+                board_obj = json.loads(raw_b[raw_b.find("{"):raw_b.rfind("}") + 1])
             saved = sb("POST", "self_learning_logs", {"user_role": cid, "task_type": "live_board", "lesson_learned": json.dumps(board_obj, ensure_ascii=False)})
-            bid = saved["id"] if saved else 1
+            bid = saved[0]["id"] if isinstance(saved, list) and saved else 1
             send_msg(cid, f"🚀 *تم إطلاق لوحة التحكم الحية بنجاح!*\n🔗 الرابط المباشر:\n{HOST_URL}/board/{bid}")
         except Exception as e:
             send_msg(cid, f"⚠ تعذر إنشاء اللوحة الحية: {e}")

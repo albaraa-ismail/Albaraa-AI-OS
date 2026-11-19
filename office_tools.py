@@ -1,4 +1,4 @@
-import os, gc, pendulum
+import os, re, gc, pendulum
 from hijridate import Gregorian
 from core_ai import sb, ai_ask, send_msg, send_file
 
@@ -38,7 +38,7 @@ def make_word(cid, msg):
     send_msg(cid, "👥 *تفعيل غرفة عمليات الوثائق:* جاري بناء الهيكل وتحرير المحاور التنفيذية...")
     title = _clean_title(msg)
     outline = ai_ask(msg, "ضع 5 محاور رئيسية لتغطية هذا الموضوع بعمق تنفيذي. اكتب كل محور في سطر مستقل:")
-    sections = [s.strip().lstrip("-*#1234567890. ") for s in outline.split("\n") if len(s.strip()) > 3][:5] or ["الإطار العام", "التحليل", "التطبيقات", "المؤشرات", "التوصيات"]
+    sections = [re.sub(r'^[\-\*\#\d\.\s]+', '', s).strip() for s in outline.split("\n") if len(s.strip()) > 3][:5] or ["الإطار العام", "التحليل", "التطبيقات", "المؤشرات", "التوصيات"]
 
     doc = Document()
     doc.styles['Normal'].font.name = 'Arial'; doc.styles['Normal'].font.size = DocPt(14)
@@ -57,13 +57,16 @@ def make_word(cid, msg):
     del doc; gc.collect()
 
 def make_excel(cid, msg):
-    import openpyxl
+    import openpyxl, arabic_reshaper
     from openpyxl.utils import get_column_letter
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.drawing.image import Image as XLImage
     import matplotlib; matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    import arabic_reshaper; from bidi.algorithm import get_display
+    from bidi.algorithm import get_display
+
+    def _ar(txt):
+        return get_display(arabic_reshaper.reshape(str(txt)), base_dir='R')
 
     send_msg(cid, "👥 *هندسة لوحة القيادة المؤسسية:* جاري بناء قاعدة البيانات، المؤشرات، والرسوم البيانية...")
     prompt = (
@@ -80,20 +83,19 @@ def make_excel(cid, msg):
     title = p1.replace('"', '').strip()[:55] if (p1 and len(p1) < 85 and "|" not in p1) else "تقرير تقييم الأداء والكفاءة المؤسسية"
     raw = p2 if "|" in p2 else res
     summary = p3 or "1. تعزيز برامج التطوير المهني للوحدات دون المستهدف.\n2. ربط الحوافز الفصلية بمؤشرات الإنجاز الفعلية.\n3. تعميم أفضل الممارسات التشغيلية."
+
     wb = openpyxl.Workbook()
     ws_dash = wb.active; ws_dash.title = "لوحة القيادة"; ws_dash.sheet_view.rightToLeft = True; ws_dash.sheet_view.showGridLines = False
     ws_data = wb.create_sheet("سجل البيانات والتحليل"); ws_data.sheet_view.rightToLeft = True
 
-    f_navy = PatternFill(start_color="0B192C", end_color="0B192C", fill_type="solid")
-    f_slate = PatternFill(start_color="1E3E62", end_color="1E3E62", fill_type="solid")
-    f_white = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
-    f_zebra = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
-    f_green = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
-    f_blue = PatternFill(start_color="DBEAFE", end_color="DBEAFE", fill_type="solid")
-    f_amber = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
-    brd = Border(left=Side(style='thin', color='CBD5E1'), right=Side(style='thin', color='CBD5E1'), top=Side(style='thin', color='CBD5E1'), bottom=Side(style='thin', color='CBD5E1'))
+    _fill = lambda hx: PatternFill(start_color=hx, end_color=hx, fill_type="solid")
+    f_navy, f_slate, f_white, f_zebra = _fill("0B192C"), _fill("1E3E62"), _fill("FFFFFF"), _fill("F8FAFC")
+    f_green, f_blue, f_amber = _fill("DCFCE7"), _fill("DBEAFE"), _fill("FEF3C7")
+    s_thin = Side(style='thin', color='CBD5E1')
+    brd = Border(left=s_thin, right=s_thin, top=s_thin, bottom=s_thin)
     aln_c = Alignment(horizontal="center", vertical="center", wrap_text=True)
     aln_r = Alignment(horizontal="right", vertical="center", wrap_text=True)
+
     parsed = []
     for l in raw.split("\n"):
         if "|" in l and not set(l.replace("|", "").strip()).issubset({"-", ":", " "}):
@@ -110,12 +112,11 @@ def make_excel(cid, msg):
         parsed = [["الاسم", "المسمى", "الإدارة", "المحقق", "المستهدف", "الإجراء"], ["سارة القحطاني", "أخصائي أول", "الموارد البشرية", 98, 90, "ترشيح للقيادة"], ["عبدالله العتيبي", "مهندس مشاريع", "العمليات", 92, 95, "تحسين الجدولة"], ["نورة الشمري", "محلل مالي", "المالية", 104, 100, "تعميم النموذج"]]
 
     headers = ["الرقم الوظيفي", "الاسم / البند", "المسمى الوظيفي", "الإدارة", "المحقق الفعلي", "المستهدف", "الإنجاز %", "الفارق", "التقييم المعتمد", "خطة التطوير"]
-    ws_data.row_dimensions.height = 32
+    ws_data.row_dimensions[1].height = 32
     for c_i, h in enumerate(headers, 1):
         c = ws_data.cell(1, c_i, h); c.fill = f_navy; c.font = Font(color="FFD166", size=11, bold=True); c.alignment = aln_c; c.border = brd
 
-    it_rows = iter(parsed); next(it_rows, None)
-    rows = list(it_rows); last_r = len(rows) + 1
+    rows = parsed[1:]; last_r = len(rows) + 1
     chart_labels, chart_act, chart_tgt = [], [], []
     sum_ac, sum_tg, sum_pct, pass_cnt = 0, 0, 0.0, 0
 
@@ -131,14 +132,15 @@ def make_excel(cid, msg):
         sum_ac += ac; sum_tg += tg; sum_pct += pct
         if pct >= 85: pass_cnt += 1
         if len(chart_labels) < 7:
-            chart_labels.append(get_display(arabic_reshaper.reshape(nm[:13]))); chart_act.append(ac); chart_tgt.append(tg)
+            chart_labels.append(_ar(nm[:13])); chart_act.append(ac); chart_tgt.append(tg)
         entries = [f"EMP-{100+idx}", nm, role_t, dp, ac, tg, f"{pct}%", f"{'+' if diff > 0 else ''}{diff}", eval_txt, act_plan]
         for c_i, val in enumerate(entries, 1):
             c = ws_data.cell(idx, c_i, val); c.border = brd; c.font = Font(color="0F172A", size=11, bold=(c_i in (1, 2, 7, 9))); c.alignment = aln_c if c_i in (1, 5, 6, 7, 8, 9) else aln_r
             if idx % 2 == 0: c.fill = f_zebra
             if c_i == 9: c.fill = f_green if pct >= 100 else (f_blue if pct >= 85 else f_amber)
+
     cnt = max(len(rows), 1); avg_pct = round(sum_pct / cnt, 1); tot_diff = round(sum_ac - sum_tg, 1)
-    tot_r = last_r + 1; ws_data.row_dimensions.height = 30
+    tot_r = last_r + 1; ws_data.row_dimensions[tot_r].height = 30
     tots = ["الإجمالي", f"{cnt} سجل", "كافة الفئات", "جميع الإدارات", round(sum_ac, 1), round(sum_tg, 1), f"{avg_pct}%", f"{'+' if tot_diff > 0 else ''}{tot_diff}", f"{pass_cnt} محقق", "المؤشر العام"]
     for c_i, val in enumerate(tots, 1):
         c = ws_data.cell(tot_r, c_i, val); c.fill = f_slate; c.font = Font(color="FFFFFF", size=11, bold=True); c.alignment = aln_c; c.border = brd
@@ -150,22 +152,21 @@ def make_excel(cid, msg):
     ws_dash.merge_cells("B4:M4"); ws_dash["B4"] = f"تاريخ الإصدار: {today_dates()}  |  بطاقة الأداء المتوازن والمؤشرات التشغيلية"; ws_dash["B4"].fill = f_slate; ws_dash["B4"].font = Font(color="FFFFFF", size=11); ws_dash["B4"].alignment = aln_c
 
     cards = [("B", "D", "إجمالي الأداء المحقق", f"{round(sum_ac, 1)}", "1E3A8A"), ("E", "G", "متوسط نسبة الإنجاز", f"{avg_pct}%", "0F766E"), ("H", "J", "الفارق عن المستهدف", f"{'+' if tot_diff > 0 else ''}{tot_diff}", "B45309"), ("K", "M", "نسبة المحققين للمعيار", f"{round((pass_cnt/cnt)*100)}%", "4338CA")]
-    ws_dash.row_dimensions.height = 26; ws_dash.row_dimensions.height = 40
+    ws_dash.row_dimensions[6].height = 26; ws_dash.row_dimensions[7].height = 40
     for cs, ce, tk, fk, hx in cards:
         ws_dash.merge_cells(f"{cs}6:{ce}6"); ws_dash.merge_cells(f"{cs}7:{ce}7")
-        ws_dash[f"{cs}6"].value = tk; ws_dash[f"{cs}6"].fill = PatternFill(start_color=hx, end_color=hx, fill_type="solid"); ws_dash[f"{cs}6"].font = Font(color="FFFFFF", size=11, bold=True); ws_dash[f"{cs}6"].alignment = aln_c
+        ws_dash[f"{cs}6"].value = tk; ws_dash[f"{cs}6"].fill = _fill(hx); ws_dash[f"{cs}6"].font = Font(color="FFFFFF", size=11, bold=True); ws_dash[f"{cs}6"].alignment = aln_c
         ws_dash[f"{cs}7"].value = fk; ws_dash[f"{cs}7"].fill = f_white; ws_dash[f"{cs}7"].font = Font(color=hx, size=18, bold=True); ws_dash[f"{cs}7"].alignment = aln_c; ws_dash[f"{cs}7"].border = brd
-
     for r_idx in range(9, 27): ws_dash.row_dimensions[r_idx].height = 20
     chart_img = "/tmp/dash_chart.png"
     try:
         fig, ax = plt.subplots(figsize=(10.5, 4.3), dpi=130)
         fig.patch.set_facecolor('#0B192C'); ax.set_facecolor('#132743')
         x_pos = range(len(chart_labels))
-        b1 = ax.bar([p - 0.18 for p in x_pos], chart_act, width=0.35, label=get_display(arabic_reshaper.reshape("المحقق الفعلي")), color='#00B4D8')
-        b2 = ax.bar([p + 0.18 for p in x_pos], chart_tgt, width=0.35, label=get_display(arabic_reshaper.reshape("المستهدف المخطط")), color='#FFD166')
+        b1 = ax.bar([p - 0.18 for p in x_pos], chart_act, width=0.35, label=_ar("المحقق الفعلي"), color='#00B4D8')
+        b2 = ax.bar([p + 0.18 for p in x_pos], chart_tgt, width=0.35, label=_ar("المستهدف المخطط"), color='#FFD166')
         ax.set_xticks(list(x_pos)); ax.set_xticklabels(chart_labels)
-        ax.set_title(get_display(arabic_reshaper.reshape("مقارنة الأداء المحقق مقابل المستهدف")), color='#FFD166', fontsize=14, fontweight='bold', pad=12)
+        ax.set_title(_ar("مقارنة الأداء المحقق مقابل المستهدف"), color='#FFD166', fontsize=14, fontweight='bold', pad=12)
         ax.tick_params(colors='white', labelsize=10)
         ax.legend(facecolor='#0B192C', edgecolor='none', labelcolor='white', fontsize=10)
         for sp in ax.spines.values(): sp.set_visible(False)
@@ -189,6 +190,7 @@ def make_excel(cid, msg):
     for f in (path, chart_img):
         if os.path.exists(f): os.remove(f)
     del wb; gc.collect()
+
 def make_pptx(cid, msg):
     import json
     from pptx import Presentation
@@ -198,136 +200,60 @@ def make_pptx(cid, msg):
 
     send_msg(cid, "📊 *تفعيل استوديو العروض التقديمية:* جاري تصميم الشرائح وتنسيق الهوية البصرية...")
     title = _clean_title(msg)
-
     prompt = (
         f"أنت خبير تصميم عروض تقديمية تنفيذية. أنشئ محتوى عرض تقديمي احترافي حول: {msg}\n"
-        "يجب أن يكون الرد بصيغة JSON صالحة فقط بدون أي نص إضافي أو علامات markdown، بالهيكل التالي تماماً:\n"
-        '{"subtitle": "وصف مختصر جذاب للعرض", "slides": [{"heading": "عنوان الشريحة", "points": ["نقطة رئيسية واضحة ومفيدة", "نقطة ثانية", "نقطة ثالثة", "نقطة رابعة"]}]}\n'
-        "أنشئ 6 شرائح متنوعة وشاملة باللغة العربية الفصحى."
+        'أرجع JSON فقط: {"subtitle": "وصف مختصر", "slides": [{"heading": "عنوان الشريحة", "points": ["نقطة 1", "نقطة 2", "نقطة 3", "نقطة 4"]}]}\n'
+        "أنشئ 6 شرائح متنوعة باللغة العربية الفصحى."
     )
-
     raw = ai_ask(msg, prompt).replace("```json", "").replace("```", "").strip()
     try:
-        start = raw.find("{")
-        end = raw.rfind("}") + 1
-        data = json.loads(raw[start:end])
+        data = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
     except Exception:
-        data = {
-            "subtitle": "عرض تحليلي واستراتيجي شامل",
-            "slides": [
-                {"heading": "نظرة عامة وأهداف العرض", "points": ["تحديد الرؤية والأهداف الاستراتيجية", "تحليل الوضع الراهن والفرص المتاحة", "رفع كفاءة الأداء وجودة المخرجات"]},
-                {"heading": "المحاور الرئيسية للتنفيذ", "points": ["التخطيط المنهجي وتوزيع المهام", "توظيف التقنيات الحديثة والأتمتة", "المتابعة المستمرة وقياس الأثر"]},
-                {"heading": "التوصيات والخطوات القادمة", "points": ["البدء الفوري بالمرحلة الأولى", "مراجعة مؤشرات الأداء بشكل دوري", "تطوير المبادرات بناءً على النتائج"]}
-            ]
-        }
+        data = {"subtitle": "عرض تحليلي واستراتيجي شامل", "slides": [{"heading": "نظرة عامة", "points": ["تحديد الأهداف الاستراتيجية", "تحليل الوضع الراهن", "رفع كفاءة الأداء"]}]}
 
-    prs = Presentation()
-    prs.slide_width = Inches(13.333)
-    prs.slide_height = Inches(7.5)
-    blank_layout = prs.slide_layouts[6]
+    prs = Presentation(); prs.slide_width = Inches(13.333); prs.slide_height = Inches(7.5)
+    blank = prs.slide_layouts[6]
+    NAVY, SLATE, GOLD, WHITE, LIGHT_BG, DARK_TXT = RGBColor(11, 25, 44), RGBColor(30, 62, 98), RGBColor(255, 209, 102), RGBColor(255, 255, 255), RGBColor(248, 250, 252), RGBColor(15, 23, 42)
 
-    NAVY = RGBColor(11, 25, 44)
-    SLATE = RGBColor(30, 62, 98)
-    GOLD = RGBColor(255, 209, 102)
-    WHITE = RGBColor(255, 255, 255)
-    LIGHT_BG = RGBColor(248, 250, 252)
-    DARK_TXT = RGBColor(15, 23, 42)
+    def _add_p(tf, txt, sz, clr, bold=False, align=PP_ALIGN.RIGHT, sp=0, first=False):
+        p = tf.paragraphs[0] if first else tf.add_paragraph()
+        p.text, p.alignment, p.font.name, p.font.size, p.font.bold, p.font.color.rgb = txt, align, "Arial", Pt(sz), bold, clr
+        if sp: p.space_before = Pt(sp)
 
-    s0 = prs.slides.add_slide(blank_layout)
-    bg0 = s0.background.fill
-    bg0.solid()
-    bg0.fore_color.rgb = NAVY
-
+    s0 = prs.slides.add_slide(blank)
+    s0.background.fill.solid(); s0.background.fill.fore_color.rgb = NAVY
     bar = s0.shapes.add_shape(1, Inches(0), Inches(6.8), Inches(13.333), Inches(0.2))
-    bar.fill.solid()
-    bar.fill.fore_color.rgb = GOLD
-    bar.line.fill.background()
+    bar.fill.solid(); bar.fill.fore_color.rgb = GOLD; bar.line.fill.background()
 
-    tb = s0.shapes.add_textbox(Inches(1), Inches(2.2), Inches(11.333), Inches(2))
-    tf = tb.text_frame
-    tf.word_wrap = True
-    p = tf.paragraphs[0]
-    p.text = title
-    p.alignment = PP_ALIGN.RIGHT
-    p.font.name = "Arial"
-    p.font.size = Pt(40)
-    p.font.bold = True
-    p.font.color.rgb = GOLD
+    tf0 = s0.shapes.add_textbox(Inches(1), Inches(2.2), Inches(11.333), Inches(2)).text_frame; tf0.word_wrap = True
+    _add_p(tf0, title, 40, GOLD, bold=True, first=True)
+    _add_p(tf0, data.get("subtitle", ""), 20, WHITE, sp=14)
+    _add_p(tf0, f"تاريخ الإصدار: {today_dates()} | Albaraa AI OS", 14, RGBColor(148, 163, 184), sp=28)
 
-    p_sub = tf.add_paragraph()
-    p_sub.text = data.get("subtitle", "")
-    p_sub.alignment = PP_ALIGN.RIGHT
-    p_sub.font.name = "Arial"
-    p_sub.font.size = Pt(20)
-    p_sub.font.color.rgb = WHITE
-    p_sub.space_before = Pt(14)
-
-    p_dt = tf.add_paragraph()
-    p_dt.text = f"تاريخ الإصدار: {today_dates()} | Albaraa AI OS"
-    p_dt.alignment = PP_ALIGN.RIGHT
-    p_dt.font.name = "Arial"
-    p_dt.font.size = Pt(14)
-    p_dt.font.color.rgb = RGBColor(148, 163, 184)
-    p_dt.space_before = Pt(28)
     for idx, sl in enumerate(data.get("slides", [])[:8], 1):
-        slide = prs.slides.add_slide(blank_layout)
-        bg = slide.background.fill
-        bg.solid()
-        bg.fore_color.rgb = LIGHT_BG
-
+        slide = prs.slides.add_slide(blank)
+        slide.background.fill.solid(); slide.background.fill.fore_color.rgb = LIGHT_BG
         hdr = slide.shapes.add_shape(1, Inches(0), Inches(0), Inches(13.333), Inches(1.2))
-        hdr.fill.solid()
-        hdr.fill.fore_color.rgb = NAVY
-        hdr.line.fill.background()
+        hdr.fill.solid(); hdr.fill.fore_color.rgb = NAVY; hdr.line.fill.background()
 
         accent = slide.shapes.add_shape(1, Inches(0), Inches(1.2), Inches(13.333), Inches(0.08))
-        accent.fill.solid()
-        accent.fill.fore_color.rgb = GOLD
-        accent.line.fill.background()
+        accent.fill.solid(); accent.fill.fore_color.rgb = GOLD; accent.line.fill.background()
 
-        htb = slide.shapes.add_textbox(Inches(0.8), Inches(0.25), Inches(11.7), Inches(0.7))
-        htf = htb.text_frame
-        hp = htf.paragraphs[0]
-        hp.text = f"{idx}. {sl.get('heading', '')}"
-        hp.alignment = PP_ALIGN.RIGHT
-        hp.font.name = "Arial"
-        hp.font.size = Pt(26)
-        hp.font.bold = True
-        hp.font.color.rgb = GOLD
+        htf = slide.shapes.add_textbox(Inches(0.8), Inches(0.25), Inches(11.7), Inches(0.7)).text_frame
+        _add_p(htf, f"{idx}. {sl.get('heading', '')}", 26, GOLD, bold=True, first=True)
 
-        btb = slide.shapes.add_textbox(Inches(1.0), Inches(1.8), Inches(11.3), Inches(4.8))
-        btf = btb.text_frame
-        btf.word_wrap = True
+        btf = slide.shapes.add_textbox(Inches(1.0), Inches(1.8), Inches(11.3), Inches(4.8)).text_frame; btf.word_wrap = True
         for p_i, pt_text in enumerate(sl.get("points", [])):
-            bp = btf.paragraphs[0] if p_i == 0 else btf.add_paragraph()
-            bp.text = f"▪ {pt_text}"
-            bp.alignment = PP_ALIGN.RIGHT
-            bp.font.name = "Arial"
-            bp.font.size = Pt(20)
-            bp.font.color.rgb = DARK_TXT
-            bp.space_after = Pt(16)
+            _add_p(btf, f"▪ {pt_text}", 20, DARK_TXT, first=(p_i == 0))
+            btf.paragraphs[p_i].space_after = Pt(16)
 
-        ftb = slide.shapes.add_textbox(Inches(0.8), Inches(6.9), Inches(11.7), Inches(0.4))
-        fp = ftb.text_frame.paragraphs[0]
-        fp.text = f"{title}  |  شريحة {idx}"
-        fp.alignment = PP_ALIGN.LEFT
-        fp.font.name = "Arial"
-        fp.font.size = Pt(11)
-        fp.font.color.rgb = SLATE
+        ftf = slide.shapes.add_textbox(Inches(0.8), Inches(6.9), Inches(11.7), Inches(0.4)).text_frame
+        _add_p(ftf, f"{title}  |  شريحة {idx}", 11, SLATE, align=PP_ALIGN.LEFT, first=True)
 
-    path = "/tmp/Presentation.pptx"
-    prs.save(path)
-    send_file(
-        cid,
-        path,
-        "Executive_Presentation.pptx",
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        f"📽️ تم تصميم العرض التقديمي الاحترافي: *{title}*"
-    )
-    if os.path.exists(path):
-        os.remove(path)
-    del prs
-    gc.collect()
+    path = "/tmp/Presentation.pptx"; prs.save(path)
+    send_file(cid, path, "Executive_Presentation.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", f"📽️ تم تصميم العرض التقديمي الاحترافي: *{title}*")
+    if os.path.exists(path): os.remove(path)
+    del prs; gc.collect()
 
 def make_powerbi_kit(cid, msg):
     from docx import Document
@@ -343,22 +269,15 @@ def make_powerbi_kit(cid, msg):
     )
     guide = ai_ask(msg, prompt, temperature=0.2)
     doc = Document()
-    doc.styles['Normal'].font.name = 'Arial'
-    doc.styles['Normal'].font.size = DocPt(13)
+    doc.styles['Normal'].font.name = 'Arial'; doc.styles['Normal'].font.size = DocPt(13)
     _set_rtl(doc.add_heading(f"دليل هندسة Power BI: {title}", 0))
     _set_rtl(doc.add_paragraph(f"تاريخ الإصدار: {today_dates()}"))
     for line in guide.split("\n"):
         cl = line.strip().replace("**", "")
-        if not cl:
-            continue
-        if cl.startswith(("#", "1.", "2.", "3.")):
-            _set_rtl(doc.add_heading(cl.lstrip("# "), level=1))
-        else:
-            _set_rtl(doc.add_paragraph(cl))
-    path = "/tmp/PowerBI_Architecture.docx"
-    doc.save(path)
+        if not cl: continue
+        if cl.startswith(("#", "1.", "2.", "3.")): _set_rtl(doc.add_heading(cl.lstrip("# "), level=1))
+        else: _set_rtl(doc.add_paragraph(cl))
+    path = "/tmp/PowerBI_Architecture.docx"; doc.save(path)
     send_file(cid, path, "PowerBI_Architecture.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", f"📈 تم إعداد حزمة هندسة Power BI ومعادلات DAX: *{title}*")
-    if os.path.exists(path):
-        os.remove(path)
-    del doc
-    gc.collect()
+    if os.path.exists(path): os.remove(path)
+    del doc; gc.collect()

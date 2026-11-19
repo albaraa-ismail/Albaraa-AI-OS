@@ -222,3 +222,16 @@ def make_excel(cid, msg):
         print("Chart Img Err:", e, flush=True)
 
     ws_dash.merge_cells("B27:M27"); ws_dash["B27"] = "💡 القراءة التحليلية والتوصيات التنفيذية للإدارة"; ws_dash["B27"].fill = f_navy; ws_dash["B27"].font = Font(color="FFD166", size=12, bold=True); ws_dash["B27"].alignment = aln_r
+    ws_dash.merge_cells("B28:M32")
+    ws_dash["B28"] = summary
+    ws_dash["B28"].fill = f_zebra
+    ws_dash["B28"].font = Font(color="0F172A", size=11)
+    ws_dash["B28"].alignment = Alignment(horizontal="right", vertical="top", wrap_text=True)
+    ws_dash["B28"].border = brd
+
+    path = "/tmp/Dashboard.xlsx"
+    wb.save(path)
+    send_file(cid, path, "Executive_Dashboard.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"📊 *{title}*")
+    if os.path.exists(path): os.remove(path)
+    if os.path.exists(chart_img): os.remove(chart_img)
+    del wb; gc.collect()

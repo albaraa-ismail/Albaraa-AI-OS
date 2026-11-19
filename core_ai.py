@@ -26,7 +26,7 @@ def ai_ask(p, s):
     clean_s, err = s + POLICY, "لا توجد مفاتيح"
     if GROQ_KEY:
         u_g = base64.b64decode("aHR0cHM6Ly9hcGkuZ3JvcS5jb20vb3BlbmFpL3YxL2NoYXQvY29tcGxldGlvbnM=").decode()
-        for gm in ("llama-3.3-70b-versatile", "llama-3.1-8b-instant", "gemma2-9b-it"):
+        for gm in ("openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3-32b", "llama-3.3-70b-versatile"):
             try:
                 r = requests.post(u_g, json={"model": gm, "messages": [{"role": "system", "content": clean_s}, {"role": "user", "content": p}]}, headers={"Authorization": f"Bearer {GROQ_KEY}"}, timeout=35)
                 if r.status_code == 200: return r.json()["choices"].pop(0)["message"]["content"].strip()
@@ -35,7 +35,7 @@ def ai_ask(p, s):
             except Exception as e: err = f"GroqEx:{str(e)[:30]}"
     if GEM_KEY:
         b_gem = base64.b64decode("aHR0cHM6Ly9nZW5lcmF0aXZlbGFuZ3VhZ2UuZ29vZ2xlYXBpcy5jb20vdjFiZXRhL21vZGVscy8=").decode()
-        for gem in ("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"):
+        for gem in ("gemini-3-flash-preview", "gemini-3.1-flash-lite-preview", "gemini-2.5-flash"):
             try:
                 r = requests.post(f"{b_gem}{gem}:generateContent?key={GEM_KEY}", json={"contents": [{"parts": [{"text": f"{clean_s}\n\n{p}"}]}]}, timeout=55)
                 if r.status_code == 200: return r.json()["candidates"].pop(0)["content"]["parts"].pop(0)["text"].strip()

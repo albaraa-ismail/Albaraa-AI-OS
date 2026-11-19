@@ -20,6 +20,7 @@ def _set_rtl(p):
     from docx.oxml import OxmlElement
     p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     p._p.get_or_add_pPr().append(OxmlElement('w:bidi'))
+
 def make_kpi(cid):
     import openpyxl
     wb = openpyxl.Workbook(); ws = wb.active; ws.sheet_view.rightToLeft = True
@@ -54,6 +55,7 @@ def make_word(cid, msg):
     send_file(cid, path, "Executive_Document.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", f"📄 تم إعداد المستند الاحترافي: *{title}*")
     if os.path.exists(path): os.remove(path)
     del doc; gc.collect()
+
 def make_excel(cid, msg):
     import openpyxl
     from openpyxl.utils import get_column_letter
@@ -148,46 +150,6 @@ def make_excel(cid, msg):
     ws_dash.merge_cells("B2:M3"); ws_dash["B2"] = f"لوحة القيادة التنفيذية: {title}"; ws_dash["B2"].fill = f_navy; ws_dash["B2"].font = Font(color="FFD166", size=18, bold=True); ws_dash["B2"].alignment = aln_c
     ws_dash.merge_cells("B4:M4"); ws_dash["B4"] = f"تاريخ الإصدار: {today_dates()}  |  بطاقة الأداء المتوازن والمؤشرات التشغيلية"; ws_dash["B4"].fill = f_slate; ws_dash["B4"].font = Font(color="FFFFFF", size=11); ws_dash["B4"].alignment = aln_c
 
-    cards = [("B", "D", "إجمالي الأداء المحقق", f"{round(sum_ac, 1)}", "1E3A8A"), ("E", "G", "متوسط نسبة الإنجاز", f"{avg_pct}%", "0F766E"), ("H", "J", "الفارق عن المستهدف", f"{'+' if tot_diff > 0 else ''}{tot_diff}", "B45309"), ("K", "M", "نسبة المحققين للمعيار", f"{round((pass_cnt/cnt)*100)}%", "4338CA")]
-    ws_dash.row_dimensions.height = 26; ws_dash.row_dimensions.height = 40
-    for cs, ce, tk, fk, hx in cards:
-        ws_dash.merge_cells(f"{cs}6:{ce}6"); ws_dash.merge_cells(f"{cs}7:{ce}7")
-        ws_dash[f"{cs}6"].value = tk; ws_dash[f"{cs}6"].fill = PatternFill(start_color=hx, end_color=hx, fill_type="solid"); ws_dash[f"{cs}6"].font = Font(color="FFFFFF", size=11, bold=True); ws_dash[f"{cs}6"].alignment = aln_c
-        ws_dash[f"{cs}7"].value = fk; ws_dash[f"{cs}7"].fill = f_white; ws_dash[f"{cs}7"].font = Font(color=hx, size=18, bold=True); ws_dash[f"{cs}7"].alignment = aln_c; ws_dash[f"{cs}7"].border = brd
-
-    for r_idx in range(9, 27): ws_dash.row_dimensions[r_idx].height = 20
-    chart_img = "/tmp/dash_chart.png"
-    try:
-        fig, ax = plt.subplots(figsize=(10.5, 4.3), dpi=130)
-        fig.patch.set_facecolor('#0B192C'); ax.set_facecolor('#132743')
-        x_pos = range(len(chart_labels))
-        b1 = ax.bar([p - 0.18 for p in x_pos], chart_act, width=0.35, label=get_display(arabic_reshaper.reshape("المحقق الفعلي")), color='#00B4D8')
-        b2 = ax.bar([p + 0.18 for p in x_pos], chart_tgt, width=0.35, label=get_display(arabic_reshaper.reshape("المستهدف المخطط")), color='#FFD166')
-        ax.set_xticks(list(x_pos)); ax.set_xticklabels(chart_labels)
-        ax.set_title(get_display(arabic_reshaper.reshape("مقارنة الأداء المحقق مقابل المستهدف")), color='#FFD166', fontsize=14, fontweight='bold', pad=12)
-        ax.tick_params(colors='white', labelsize=10)
-        ax.legend(facecolor='#0B192C', edgecolor='none', labelcolor='white', fontsize=10)
-        for sp in ax.spines.values(): sp.set_visible(False)
-        for b in b1:
-            yv = b.get_height()
-            ax.text(b.get_x() + b.get_width()/2, yv + 1, str(yv), ha='center', va='bottom', color='#00B4D8', fontsize=9, fontweight='bold')
-        plt.tight_layout(); plt.savefig(chart_img, facecolor='#0B192C'); plt.close(fig)
-        if os.path.exists(chart_img):
-            img_xl = XLImage(chart_img); img_xl.width = 820; img_xl.height = 330
-            ws_dash.add_image(img_xl, "B9")
-    except Exception as e: print("Chart Img Err:", e, flush=True)
-
-    clean_sum = summary.replace("**", "").replace("###", "").replace("##", "").strip()
-    ws_dash.merge_cells("B27:M27"); ws_dash["B27"] = "💡 القراءة التحليلية والتوصيات التنفيذية للإدارة"; ws_dash["B27"].fill = f_navy; ws_dash["B27"].font = Font(color="FFD166", size=12, bold=True); ws_dash["B27"].alignment = aln_r
-    ws_dash.row_dimensions.height = 28
-    ws_dash.merge_cells("B28:M33"); ws_dash["B28"] = clean_sum; ws_dash["B28"].fill = f_white; ws_dash["B28"].font = Font(color="1E293B", size=11); ws_dash["B28"].alignment = Alignment(horizontal="right", vertical="top", wrap_text=True); ws_dash["B28"].border = brd
-
-    path = "/tmp/Executive_Dashboard.xlsx"; wb.save(path)
-    send_file(cid, path, "Executive_Dashboard.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"📊 تم إعداد لوحة القيادة المؤسسية: *{title}*\n✨ تشمل: 4 بطاقات مؤشرات + سجل الموظفين وخطة التطوير.")
-    if os.path.exists(chart_img): send_file(cid, chart_img, "Performance_Chart.png", "image/png", f"📈 الرسم البياني لمؤشرات: *{title}*")
-    for f in (path, chart_img):
-        if os.path.exists(f): os.remove(f)
-    del wb; gc.collect()
 def make_pptx(cid, msg):
     import json
     from pptx import Presentation
@@ -225,14 +187,13 @@ def make_pptx(cid, msg):
     prs.slide_height = Inches(7.5)
     blank_layout = prs.slide_layouts[6]
 
-    NAVY = RGBColor(11, 25, 44)      # #0B192C
-    SLATE = RGBColor(30, 62, 98)     # #1E3E62
-    GOLD = RGBColor(255, 209, 102)   # #FFD166
+    NAVY = RGBColor(11, 25, 44)
+    SLATE = RGBColor(30, 62, 98)
+    GOLD = RGBColor(255, 209, 102)
     WHITE = RGBColor(255, 255, 255)
     LIGHT_BG = RGBColor(248, 250, 252)
     DARK_TXT = RGBColor(15, 23, 42)
 
-    # 1. شريحة الغلاف
     s0 = prs.slides.add_slide(blank_layout)
     bg0 = s0.background.fill
     bg0.solid()
@@ -270,7 +231,6 @@ def make_pptx(cid, msg):
     p_dt.font.color.rgb = RGBColor(148, 163, 184)
     p_dt.space_before = Pt(28)
 
-    # 2. شرائح المحتوى
     for idx, sl in enumerate(data.get("slides", [])[:8], 1):
         slide = prs.slides.add_slide(blank_layout)
         bg = slide.background.fill
@@ -329,4 +289,38 @@ def make_pptx(cid, msg):
     if os.path.exists(path):
         os.remove(path)
     del prs
+    gc.collect()
+
+def make_powerbi_kit(cid, msg):
+    from docx import Document
+    from docx.shared import Pt as DocPt
+    send_msg(cid, "📊 *وكيل نمذجة البيانات وPower BI:* جاري هندسة نموذج البيانات ومعادلات DAX الاحترافية...")
+    title = _clean_title(msg)
+    prompt = (
+        f"أنت خبير Power BI ومهندس ذكاء أعمال (BI Architect). للمشروع التالي: {msg}\n"
+        "أعدّ وثيقة هندسية تنفيذية تشمل:\n"
+        "1. هيكل الجداول المقترح (Fact & Dimension Tables) وأعمدة كل جدول.\n"
+        "2. 6 معادلات DAX احترافية مكتوبة بدقة وجاهزة للنسخ المباشر داخل Power BI لحساب المؤشرات (KPIs).\n"
+        "3. تصميم لوحة القيادة (Dashboard Layout) وتوزيع البطاقات والرسوم البيانية في كل صفحة."
+    )
+    guide = ai_ask(msg, prompt, temperature=0.2)
+    doc = Document()
+    doc.styles['Normal'].font.name = 'Arial'
+    doc.styles['Normal'].font.size = DocPt(13)
+    _set_rtl(doc.add_heading(f"دليل هندسة Power BI: {title}", 0))
+    _set_rtl(doc.add_paragraph(f"تاريخ الإصدار: {today_dates()}"))
+    for line in guide.split("\n"):
+        cl = line.strip().replace("**", "")
+        if not cl:
+            continue
+        if cl.startswith(("#", "1.", "2.", "3.")):
+            _set_rtl(doc.add_heading(cl.lstrip("# "), level=1))
+        else:
+            _set_rtl(doc.add_paragraph(cl))
+    path = "/tmp/PowerBI_Architecture.docx"
+    doc.save(path)
+    send_file(cid, path, "PowerBI_Architecture.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", f"📈 تم إعداد حزمة هندسة Power BI ومعادلات DAX: *{title}*")
+    if os.path.exists(path):
+        os.remove(path)
+    del doc
     gc.collect()

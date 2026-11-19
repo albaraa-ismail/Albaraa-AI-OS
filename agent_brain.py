@@ -36,6 +36,8 @@ def run_task(cid, msg, role, sname):
     if any(w in low for w in ("وكيل", "قسم")) and any(v in low for v in ("ابن", "أبن", "ابني", "أبني", "انشئ", "أنشئ", "سوي", "اعمل", "جديد")):
         propose_agent(cid, msg, sname); return
 
+    send_msg(cid, "🧭 *غرفة عمليات الوكلاء:* تم استلام الهدف، الوكيل القائد يحلل المتطلبات ويوزع المهام...")
+
     plan = _plan_mission(msg)
     deliv = plan.get("deliverable", "report")
     if any(k in low for k in ("فيديو", "فديو", "مقطع", "video")): deliv = "video"
@@ -49,8 +51,6 @@ def run_task(cid, msg, role, sname):
     elif deliv == "ppt": make_ppt(cid, msg); dtype = "PowerPoint"
     else:
         steps_txt = " ⬅️ ".join(plan.get("steps", [])[:3])
-        send_msg(cid, f"🧭 *غرفة عمليات الوكلاء:*\n• *المسار:* {steps_txt}\n• *الحالة:* جاري التنفيذ عبر الوكلاء المتخصصين...")
-
         web = ""
         try:
             with DDGS() as dd: web = "\n".join([x.get("body", "") for x in dd.text(plan.get("search_query", msg), max_results=3)])
@@ -59,12 +59,10 @@ def run_task(cid, msg, role, sname):
         ctx = get_context(cid)
         ags = "\n".join([f"- {a.get('agent_name')}: {a.get('system_prompt')}" for a in sb("GET", "agents_registry", q="?unit_name=eq.قسم_معتمد_نشط&order=id.desc&limit=10")])
 
-        # 1. وكيل التحليل والإنتاج
         raw_work = ai_ask(
             f"التوقيت: {_time_ctx()}\nالمهمة: {msg}\nخطة التنفيذ: {steps_txt}\nالذاكرة:\n{ctx}\nبيانات البحث:\n{web}",
             f"أنت فريق الوكلاء التنفيذيين:\n{ags}\nأنجز المهمة كمخرج مؤسسي متكامل ومنظم بعناوين وجداول نصية وتوصيات عملية."
         )
-        # 2. وكيل الحوكمة وضمان الجودة
         governed = ai_ask(
             f"المهمة الأصلية: {msg}\nمخرج فريق الإنتاج:\n{raw_work}",
             "أنت وكيل الحوكمة وضمان الجودة. دقق المخرج، ارفع جودته التنفيذية، واختم بـ [التوصية التنفيذية التالية]. يُحظر ذكر أي اسم منظومة."

@@ -43,7 +43,8 @@ def live_board(bid):
     if not res:
         return "<h2 dir='rtl'>⚠️ اللوحة غير موجودة</h2>", 404
 
-    board = json.loads(res["lesson_learned"])
+    record = res[0] if isinstance(res, list) else res
+    board = json.loads(record["lesson_learned"])
     cols = board.get("cols", ["البند", "القسم", "المحقق", "المستهدف", "الحالة"])
     rows = board.get("rows", [])
     ai_reply = ""
@@ -85,7 +86,7 @@ def live_board(bid):
         board["cols"], board["rows"] = cols, rows
         sb("PATCH", "self_learning_logs", {"lesson_learned": json.dumps(board, ensure_ascii=False)}, q=f"?id=eq.{bid}")
 
-    labels = [str(r) for r in rows[:12] if r]
+    labels = [str(r[0]) if isinstance(r, list) and r else str(r) for r in rows[:12] if r]
     values = []
     for r in rows[:12]:
         num = 0
@@ -110,8 +111,11 @@ def live_board(bid):
     <script src='{_TW_CDN}'></script>
     <script src='{_CH_CDN}'></script>
     <link href='{_GF_CDN}' rel='stylesheet'>
-    <style>body{{font-family:'Cairo',sans-serif;background:#0b1120;color:#f8fafc}}</style></head>
-    <body class='p-4 md:p-8 max-w-7xl mx-auto'>
+    <style>
+      body{{font-family:'Cairo',sans-serif;background:#0b1120;color:#f8fafc;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;}}
+      input, textarea{{-webkit-user-select:text;-moz-user-select:text;-ms-user-select:text;user-select:text;}}
+    </style></head>
+    <body oncontextmenu='return false;' class='p-4 md:p-8 max-w-7xl mx-auto'>
       <div class='flex flex-wrap justify-between items-center gap-4 mb-6 bg-slate-900/90 border border-slate-800 p-5 rounded-2xl shadow-xl'>
         <div>
           <span class='text-xs font-semibold px-2.5 py-1 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/20'>Power BI Live Mode</span>
@@ -150,6 +154,9 @@ def live_board(bid):
       </div>
 
       <script>
+        document.addEventListener('keydown', function(e) {{
+          if (e.ctrlKey && (e.key === 'c' || e.key === 'u' || e.key === 's' || e.key === 'p')) {{ e.preventDefault(); }}
+        }});
         new Chart(document.getElementById('kpiChart'), {{
           type: 'bar',
           data: {{
@@ -167,7 +174,8 @@ def export_board(bid):
     res = sb("GET", "self_learning_logs", q=f"?id=eq.{bid}")
     if not res:
         return "Not Found", 404
-    board = json.loads(res[0]["lesson_learned"])
+    record = res[0] if isinstance(res, list) else res
+    board = json.loads(record["lesson_learned"])
     wb = Workbook(); ws = wb.active; ws.sheet_view.rightToLeft = True
     ws.append(board.get("cols", []))
     for r in board.get("rows", []): ws.append(r)
@@ -195,7 +203,6 @@ def api_web_chat():
         return jsonify({"error": "empty_message"}), 400
     reply = run_task(f"web_{uid}", msg, "trainee", uid)
     return jsonify({"reply": reply}), 200
-
 @app.route("/api/robotics", methods=["POST"])
 def api_robotics():
     body = request.get_json(silent=True) or {}
@@ -207,6 +214,7 @@ def api_robotics():
 @app.route("/", methods=["GET"])
 def home():
     return "Albaraa AI OS Active (25 Modules Online)", 200
+
 HELP_MENU = (
     "🤖 *منظومة Albaraa AI OS التنفيذية (25 وحدة متكاملة)*\n\n"
     "📌 *القدرات والأدوات المتاحة حالياً:*\n"
@@ -225,8 +233,26 @@ HELP_MENU = (
 
 
 def _is_authorized(cid: str, sender: str) -> bool:
-    session = IAM_GATEWAY.resolve_session(cid, sender=sender)
-    return bool(session.get("authorized"))
+    # 1. السماح التلقائي للقروب المحدد في متغيرات البيئة
+    if ALLOWED_GROUP and (cid == ALLOWED_GROUP or ALLOWED_GROUP in cid):
+        return True
+
+    # 2. استخراج الأرقام فقط للمقارنة الدقيقة بين المعرفات
+    cid_digits = "".join(filter(str.isdigit, cid.split("@")[0])) if cid else ""
+    sender_digits = "".join(filter(str.isdigit, sender.split("@")[0])) if sender else ""
+
+    # 3. السماح لمحادثتك مع نفسك أو رسائلك المباشرة كمدير للنظام
+    if ADMIN_PHONE and (cid_digits == ADMIN_PHONE or sender_digits == ADMIN_PHONE):
+        return True
+    if AHMED_PHONE and (cid_digits == AHMED_PHONE or sender_digits == AHMED_PHONE):
+        return True
+
+    # 4. الرجوع لبوابة الصلاحيات الأساسية كخيار إضافي
+    try:
+        session = IAM_GATEWAY.resolve_session(cid, sender=sender)
+        return bool(session.get("authorized"))
+    except Exception:
+        return False
 
 
 def _run_with_tip(fn, cid, task):
@@ -310,16 +336,21 @@ def _handle_media_message(cid: str, mdata: dict, sname: str):
 def webhook():
     data = request.json or {}
     wtype = data.get("typeWebhook", "")
-    if wtype not in ("incomingMessageReceived", "outgoingMessageReceived"):
+    if wtype not in ("incomingMessageReceived", "outgoingMessageReceived", "outgoingAPIMessageReceived"):
         return jsonify({"status": "ignored"}), 200
+
     mid = data.get("idMessage", "")
     if _mark_seen(mid):
         return jsonify({"status": "dup"}), 200
+
     sdata = data.get("senderData", {})
     cid = sdata.get("chatId", "")
     sender = sdata.get("sender", "")
+
     if not _is_authorized(cid, sender):
+        print(f"BLOCKED: type={wtype} | cid={cid} | sender={sender}", flush=True)
         return jsonify({"status": "unauthorized"}), 200
+
     mdata = data.get("messageData", {})
     sname = sdata.get("senderName", "User")
 
@@ -327,10 +358,17 @@ def webhook():
         EXECUTOR.submit(safe_run, _handle_media_message, cid, mdata, sname)
         return jsonify({"status": "media_queued"}), 200
 
-    txt = (mdata.get("textMessageData", {}).get("textMessage") or mdata.get("extendedTextMessageData", {}).get("text") or "").strip()
-    if txt and cid and not any(txt.startswith(p) for p in ("🔍", "⚙️", "🛡️", "📑", "🌐", "🚀", "💻", "⚠", "✅", "🤖", "📊", "📄", "📽️", "👥", "💡", "🧠", "🎙")):
+    txt = (
+        mdata.get("textMessageData", {}).get("textMessage")
+        or mdata.get("extendedTextMessageData", {}).get("text")
+        or ""
+    ).strip()
+
+    bot_prefixes = ("🔍", "⚙️", "🛡️", "📑", "🌐", "🚀", "💻", "⚠", "✅", "🤖", "📊", "📄", "📽️", "👥", "💡", "🧠", "🎙")
+    if txt and cid and not any(txt.startswith(p) for p in bot_prefixes):
         print(f"IN: {wtype} | CID: {cid} | MSG: {txt[:25]}", flush=True)
         EXECUTOR.submit(_dispatch_smart, cid, txt, sname)
+
     return jsonify({"status": "ok"}), 200
 
 

@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import random
 import requests
 from core.failover_cache import SMART_CACHE, FAILOVER
 from core.event_bus import BUS
@@ -22,12 +23,19 @@ def _keys(prefix: str):
     return vals
 
 
+def _rotated(keys_list: list) -> list:
+    if len(keys_list) <= 1:
+        return list(keys_list)
+    shift = random.randint(0, len(keys_list) - 1)
+    return keys_list[shift:] + keys_list[:shift]
+
+
 SB_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
 SB_KEY = os.environ.get("SUPABASE_KEY", "").strip()
 GEMINI_BASE_URL = "".join(["https:/", "/generativelanguage.googleapis.", "com/v1beta/models/"])
 
 GEM_KEYS = _keys("GEMINI_API_KEY")
-GEM_KEY = GEM_KEYS[0] if GEM_KEYS else ""
+GEM_KEY = GEM_KEYS if GEM_KEYS else ""
 GROQ_KEYS = _keys("GROQ_API_KEY")
 SAMBA_KEYS = _keys("SAMBANOVA_API_KEY")
 COHERE_KEYS = _keys("COHERE_API_KEY")
@@ -70,9 +78,9 @@ def _ask_openai_compat(base_url: str, key: str, model: str, prompt: str, system:
         msgs.append({"role": "system", "content": system})
     msgs.append({"role": "user", "content": prompt})
     payload = {"model": model, "messages": msgs, "temperature": temp, "max_tokens": 2048}
-    r = SESSION.post(base_url, headers=headers, json=payload, timeout=28)
+    r = SESSION.post(base_url, headers=headers, json=payload, timeout=22)
     if r.status_code == 200:
-        return r.json()["choices"][0]["message"]["content"].strip()
+        return r.json()["choices"]["message"]["content"].strip()
     return None
 
 
@@ -84,9 +92,9 @@ def _ask_gemini(key: str, prompt: str, system: str, temp: float):
     }
     for model in ("gemini-2.0-flash", "gemini-1.5-flash"):
         url = f"{GEMINI_BASE_URL}{model}:generateContent?key={key}"
-        r = SESSION.post(url, json=payload, timeout=28)
+        r = SESSION.post(url, json=payload, timeout=22)
         if r.status_code == 200:
-            return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            return r.json()["candidates"]["content"]["parts"]["text"].strip()
     return None
 
 
@@ -97,9 +105,9 @@ def _ask_cohere(key: str, prompt: str, system: str, temp: float):
     if system:
         msgs.append({"role": "system", "content": system})
     msgs.append({"role": "user", "content": prompt})
-    r = SESSION.post(url, headers=headers, json={"model": "command-r-plus-08-2024", "messages": msgs, "temperature": temp}, timeout=28)
+    r = SESSION.post(url, headers=headers, json={"model": "command-r-plus-08-2024", "messages": msgs, "temperature": temp}, timeout=22)
     if r.status_code == 200:
-        return r.json()["message"]["content"][0]["text"].strip()
+        return r.json()["message"]["content"]["text"].strip()
     return None
 
 
@@ -112,7 +120,7 @@ def _ask_cloudflare(prompt: str, system: str, temp: float):
     if system:
         msgs.append({"role": "system", "content": system})
     msgs.append({"role": "user", "content": prompt})
-    r = SESSION.post(url, headers=headers, json={"messages": msgs, "temperature": temp}, timeout=28)
+    r = SESSION.post(url, headers=headers, json={"messages": msgs, "temperature": temp}, timeout=22)
     if r.status_code == 200:
         return r.json().get("result", {}).get("response", "").strip()
     return None
@@ -129,29 +137,49 @@ def ai_ask(prompt: str, system: str = "", temperature: float = 0.4, mode: str = 
     samba_url = "".join(["https:/", "/api.sambanova.", "ai/v1/chat/completions"])
     or_url = "".join(["https:/", "/openrouter.", "ai/api/v1/chat/completions"])
 
-    if mode == "arabic":
-        for k in GEM_KEYS:
-            providers.append(("gemini", k))
-        for k in COHERE_KEYS:
-            providers.append(("cohere", k))
-        for k in GROQ_KEYS:
-            providers.append(("groq", k))
-        for k in SAMBA_KEYS:
-            providers.append(("samba", k))
-    else:
-        for k in GROQ_KEYS:
-            providers.append(("groq", k))
-        for k in SAMBA_KEYS:
-            providers.append(("samba", k))
-        for k in GEM_KEYS:
-            providers.append(("gemini", k))
-        for k in COHERE_KEYS:
-            providers.append(("cohere", k))
+    gem_pool = _rotated(GEM_KEYS)
+    cohere_pool = _rotated(COHERE_KEYS)
+    groq_pool = _rotated(GROQ_KEYS)
+    samba_pool = _rotated(SAMBA_KEYS)
+    or_pool = _rotated(OR_KEYS)
 
-    if CF_ACCOUNT and CF_TOKEN:
-        providers.append(("cloudflare", "cf"))
-    for k in OR_KEYS:
-        providers.append(("openrouter", k))
+    if mode == "arabic":
+        for k in gem_pool:
+            providers.append(("gemini", k))
+        for k in cohere_pool:
+            providers.append(("cohere", k))
+        for k in groq_pool:
+            providers.append(("groq", k))
+        for k in samba_pool:
+            providers.append(("samba", k))
+        if CF_ACCOUNT and CF_TOKEN:
+            providers.append(("cloudflare", "cf"))
+        for k in or_pool:
+            providers.append(("openrouter", k))
+    elif mode == "fast":
+        for k in groq_pool:
+            providers.append(("groq", k))
+        for k in samba_pool:
+            providers.append(("samba", k))
+        if CF_ACCOUNT and CF_TOKEN:
+            providers.append(("cloudflare", "cf"))
+        for k in gem_pool:
+            providers.append(("gemini", k))
+        for k in or_pool:
+            providers.append(("openrouter", k))
+    else:
+        for k in groq_pool:
+            providers.append(("groq", k))
+        for k in gem_pool:
+            providers.append(("gemini", k))
+        for k in samba_pool:
+            providers.append(("samba", k))
+        for k in cohere_pool:
+            providers.append(("cohere", k))
+        if CF_ACCOUNT and CF_TOKEN:
+            providers.append(("cloudflare", "cf"))
+        for k in or_pool:
+            providers.append(("openrouter", k))
 
     def _run_provider(prov):
         ptype, key = prov
@@ -179,7 +207,7 @@ def ai_ask(prompt: str, system: str = "", temperature: float = 0.4, mode: str = 
         return answer
 
     BUS.publish("ai.response_failed", {"mode": mode, "latency_ms": latency_ms})
-    return "⚠ تعذر الحصول على استجابة من محركات الذكاء الاصطناعي حالياً، يرجى التحقق من مفاتيح الربط."
+    return "⚠ تعذر الحصول على استجابة من المحركات حالياً، يرجى إعادة المحاولة."
 
 
 def ai_ask_json(prompt: str, system: str = "", mode: str = "fast"):

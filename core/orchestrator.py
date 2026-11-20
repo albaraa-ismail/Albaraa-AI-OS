@@ -31,12 +31,12 @@ class ChiefOrchestrator:
             '"needs_web_search": true/false, "search_query": "استعلام بحث دقيق إن لزم", '
             '"subtasks": ["خطوة 1", "خطوة 2"]}'
         )
-        plan = ai_ask_json(f"السياق:\n{context[:1200]}\n\nالطلب:\n{user_prompt}", sys_prompt, mode="fast")
+        plan = ai_ask_json(f"السياق:\n{context[:1200]}\n\nالطلب:\n{user_prompt[:1500]}", sys_prompt, mode="fast")
         if isinstance(plan, dict) and "intent" in plan:
             return plan
-        return {"intent": "general", "needs_web_search": False, "search_query": "", "subtasks": [user_prompt]}
+        return {"intent": "general", "needs_web_search": False, "search_query": "", "subtasks": [user_prompt[:300]]}
 
-    def execute(self, cid: str, raw_msg: str, role: str = "admin", sname: str = "User") -> str:
+    def execute(self, cid: str, raw_msg: str, role: str = "admin", sname: str = "User", skip_research: bool = False) -> str:
         t0 = time.time()
         MONITOR.record_start("chief_orchestrator")
         BUS.publish("task.received", {"cid": cid, "role": role, "sender": sname})
@@ -79,7 +79,7 @@ class ChiefOrchestrator:
 
         # 7. تنفيذ البحث أو البرمجة أو التحليل (الوحدة 18)
         research_notes = ""
-        if plan.get("needs_web_search") or ml_pred["intent"] == "research" or chosen_agent == "research":
+        if not skip_research and (plan.get("needs_web_search") or ml_pred["intent"] == "research" or chosen_agent == "research"):
             send_msg(cid, "🔍 *وكيل البحث والتفكير العميق:* جاري جمع البيانات وتدقيق المراجع...")
             q = plan.get("search_query") or clean_msg
             research_notes = self.researcher.deep_research(q)
@@ -95,6 +95,16 @@ class ChiefOrchestrator:
             full_prompt = f"{memory_ctx}\n\n{research_notes}\n\nطلب المستخدم:\n{clean_msg}".strip()
             draft = ai_ask(full_prompt, sys_prompt, mode="arabic")
 
+        # إيقاف المراجعة وحفظ الذاكرة في حال فشل التوليد الأساسي
+        if not draft or draft.strip().startswith("⚠"):
+            elapsed = round(time.time() - t0, 2)
+            RL_ROUTER.update_reward(ml_pred["intent"], chosen_agent, -0.5)
+            MONITOR.record_end("chief_orchestrator", elapsed, success=False)
+            AUDIT_LEDGER.append(cid, "TASK_FAILED", {"agent": chosen_agent, "elapsed_sec": elapsed})
+            err_msg = draft or "⚠ تعذر الحصول على استجابة من المحركات حالياً، يرجى إعادة المحاولة."
+            send_msg(cid, err_msg)
+            return err_msg
+
         # 8. المراجعة وتحسين الأسلوب البشري + استعادة البيانات المقنّعة (الوحدة 19)
         reviewed = self.reviewer.review_and_refine(clean_msg, draft)
         polished = polish_human_style(reviewed)
@@ -102,12 +112,11 @@ class ChiefOrchestrator:
 
         # 9. تحديث التعلم المعزّز، الذاكرة، الرصد، والتدقيق الجنائي (الوحدات 10، 17، 20، 23، 24)
         elapsed = round(time.time() - t0, 2)
-        reward = 1.0 if ("⚠" not in final_answer and len(final_answer) > 30) else -0.5
-        RL_ROUTER.update_reward(ml_pred["intent"], chosen_agent, reward)
+        RL_ROUTER.update_reward(ml_pred["intent"], chosen_agent, 1.0)
 
         save_memory(session["tenant_id"], role, sname, raw_msg, final_answer)
         log_kpi(role, chosen_agent, elapsed, "text_response")
-        MONITOR.record_end("chief_orchestrator", elapsed, success=(reward > 0))
+        MONITOR.record_end("chief_orchestrator", elapsed, success=True)
         AUDIT_LEDGER.append(cid, "TASK_COMPLETED", {"agent": chosen_agent, "elapsed_sec": elapsed})
         BUS.publish("task.completed", {"cid": cid, "agent": chosen_agent, "elapsed": elapsed})
 
@@ -118,6 +127,6 @@ class ChiefOrchestrator:
 ORCHESTRATOR = ChiefOrchestrator()
 
 
-def run_task(cid: str, msg: str, role: str = "admin", sname: str = "User") -> str:
+def run_task(cid: str, msg: str, role: str = "admin", sname: str = "User", skip_research: bool = False) -> str:
     """واجهة توافقية تحافظ على عمل جميع الاستدعاءات السابقة بسلاسة."""
-    return ORCHESTRATOR.execute(cid, msg, role, sname)
+    return ORCHESTRATOR.execute(cid, msg, role, sname, skip_research=skip_research)

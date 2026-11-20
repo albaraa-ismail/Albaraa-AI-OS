@@ -292,83 +292,75 @@ def make_pptx(cid, msg):
 
     ws_dash.merge_cells("B2:M3"); ws_dash["B2"] = f"لوحة القيادة التنفيذية: {title}"; ws_dash["B2"].fill = f_navy; ws_dash["B2"].font = Font(color="FFD166", size=18, bold=True); ws_dash["B2"].alignment = aln_c
     ws_dash.merge_cells("B4:M4"); ws_dash["B4"] = f"تاريخ الإصدار: {today_dates()}  |  بطاقة الأداء المتوازن والمؤشرات التشغيلية"; ws_dash["B4"].fill = f_slate; ws_dash["B4"].font = Font(color="FFFFFF", size=11); ws_dash["B4"].alignment = aln_c
+    for idx, sl in enumerate(data.get("slides", [])[:8], 1):
+        slide = prs.slides.add_slide(blank)
+        slide.background.fill.solid(); slide.background.fill.fore_color.rgb = LIGHT_BG
+        hdr = slide.shapes.add_shape(1, Inches(0), Inches(0), Inches(13.333), Inches(1.2))
+        hdr.fill.solid(); hdr.fill.fore_color.rgb = NAVY; hdr.line.fill.background()
 
-    cards = [("B", "D", "إجمالي الأداء المحقق", f"{round(sum_ac, 1)}", "1E3A8A"), ("E", "G", "متوسط نسبة الإنجاز", f"{avg_pct}%", "0F766E"), ("H", "J", "الفارق عن المستهدف", f"{'+' if tot_diff > 0 else ''}{tot_diff}", "B45309"), ("K", "M", "نسبة المحققين للمعيار", f"{round((pass_cnt/cnt)*100)}%", "4338CA")]
-    ws_dash.row_dimensions[6].height = 26; ws_dash.row_dimensions[7].height = 40
-    for cs, ce, tk, fk, hx in cards:
-        ws_dash.merge_cells(f"{cs}6:{ce}6"); ws_dash.merge_cells(f"{cs}7:{ce}7")
-        ws_dash[f"{cs}6"].value = tk; ws_dash[f"{cs}6"].fill = _fill(hx); ws_dash[f"{cs}6"].font = Font(color="FFFFFF", size=11, bold=True); ws_dash[f"{cs}6"].alignment = aln_c
-        ws_dash[f"{cs}7"].value = fk; ws_dash[f"{cs}7"].fill = f_white; ws_dash[f"{cs}7"].font = Font(color=hx, size=18, bold=True); ws_dash[f"{cs}7"].alignment = aln_c; ws_dash[f"{cs}7"].border = brd
+        accent = slide.shapes.add_shape(1, Inches(0), Inches(1.2), Inches(13.333), Inches(0.08))
+        accent.fill.solid(); accent.fill.fore_color.rgb = GOLD; accent.line.fill.background()
 
-    for r_idx in range(9, 27): ws_dash.row_dimensions[r_idx].height = 20
-    chart_img = "/tmp/dash_chart.png"
-    try:
-        fig, ax = plt.subplots(figsize=(10.5, 4.3), dpi=130)
-        fig.patch.set_facecolor('#0B192C'); ax.set_facecolor('#132743')
-        x_pos = range(len(chart_labels))
-        b1 = ax.bar([p - 0.18 for p in x_pos], chart_act, width=0.35, label=_ar("المحقق الفعلي"), color='#00B4D8')
-        b2 = ax.bar([p + 0.18 for p in x_pos], chart_tgt, width=0.35, label=_ar("المستهدف المخطط"), color='#FFD166')
-        ax.set_xticks(list(x_pos)); ax.set_xticklabels(chart_labels)
-        ax.set_title(_ar("مقارنة الأداء المحقق مقابل المستهدف"), color='#FFD166', fontsize=14, fontweight='bold', pad=12)
-        ax.tick_params(colors='white', labelsize=10)
-        ax.legend(facecolor='#0B192C', edgecolor='none', labelcolor='white', fontsize=10)
-        for sp in ax.spines.values(): sp.set_visible(False)
-        for b in b1:
-            yv = b.get_height()
-            ax.text(b.get_x() + b.get_width()/2, yv + 1, str(yv), ha='center', va='bottom', color='#00B4D8', fontsize=9, fontweight='bold')
-        plt.tight_layout(); plt.savefig(chart_img, facecolor='#0B192C'); plt.close(fig)
-        if os.path.exists(chart_img):
-            img_xl = XLImage(chart_img); img_xl.width = 820; img_xl.height = 330
-            ws_dash.add_image(img_xl, "B9")
-    except Exception as e: print("Chart Img Err:", e, flush=True)
+        htf = slide.shapes.add_textbox(Inches(0.8), Inches(0.25), Inches(11.7), Inches(0.7)).text_frame
+        _add_p(htf, f"{idx}. {sl.get('heading', '')}", 26, GOLD, bold=True, first=True)
 
-    clean_sum = summary.replace("**", "").replace("###", "").replace("##", "").strip()
-    ws_dash.merge_cells("B27:M27"); ws_dash["B27"] = "💡 القراءة التحليلية والتوصيات التنفيذية للإدارة"; ws_dash["B27"].fill = f_navy; ws_dash["B27"].font = Font(color="FFD166", size=12, bold=True); ws_dash["B27"].alignment = aln_r
-    ws_dash.row_dimensions[28].height = 28
-    ws_dash.merge_cells("B28:M33"); ws_dash["B28"] = clean_sum; ws_dash["B28"].fill = f_white; ws_dash["B28"].font = Font(color="1E293B", size=11); ws_dash["B28"].alignment = Alignment(horizontal="right", vertical="top", wrap_text=True); ws_dash["B28"].border = brd
+        btf = slide.shapes.add_textbox(Inches(1.0), Inches(1.8), Inches(11.3), Inches(4.8)).text_frame; btf.word_wrap = True
+        for p_i, pt_text in enumerate(sl.get("points", [])):
+            _add_p(btf, f"▪ {pt_text}", 20, DARK_TXT, first=(p_i == 0))
+            btf.paragraphs[p_i].space_after = Pt(16)
 
-    path = "/tmp/Executive_Dashboard.xlsx"; wb.save(path)
-    send_file(cid, path, "Executive_Dashboard.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"📊 تم إعداد لوحة القيادة المؤسسية: *{title}*\n✨ تشمل: 4 بطاقات مؤشرات + سجل الموظفين وخطة التطوير.")
-    if os.path.exists(chart_img): send_file(cid, chart_img, "Performance_Chart.png", "image/png", f"📈 الرسم البياني لمؤشرات: *{title}*")
-    for f in (path, chart_img):
-        if os.path.exists(f): os.remove(f)
-    del wb; gc.collect()
+        ftf = slide.shapes.add_textbox(Inches(0.8), Inches(6.9), Inches(11.7), Inches(0.4)).text_frame
+        _add_p(ftf, f"{title}  |  شريحة {idx}", 11, SLATE, align=PP_ALIGN.LEFT, first=True)
 
-def make_pptx(cid, msg):
-    import json
-    from pptx import Presentation
-    from pptx.util import Inches, Pt
-    from pptx.dml.color import RGBColor
-    from pptx.enum.text import PP_ALIGN
+    path = "/tmp/Presentation.pptx"; prs.save(path)
+    send_file(cid, path, "Executive_Presentation.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", f"📽️ تم تصميم العرض التقديمي الاحترافي: *{title}*")
+    if os.path.exists(path): os.remove(path)
+    del prs; gc.collect()
 
-    send_msg(cid, "📊 *تفعيل استوديو العروض التقديمية:* جاري تصميم الشرائح وتنسيق الهوية البصرية...")
+def make_powerbi_kit(cid, msg):
+    from docx import Document
+    from docx.shared import Pt as DocPt, RGBColor
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import nsdecls
+
+    send_msg(cid, "📊 *وكيل نمذجة البيانات وPower BI:* جاري هندسة نموذج البيانات ومعادلات DAX الاحترافية...")
     title = _clean_title(msg)
     prompt = (
-        f"أنت خبير تصميم عروض تقديمية تنفيذية. أنشئ محتوى عرض تقديمي احترافي حول: {msg}\n"
-        'أرجع JSON فقط: {"subtitle": "وصف مختصر", "slides": [{"heading": "عنوان الشريحة", "points": ["نقطة 1", "نقطة 2", "نقطة 3", "نقطة 4"]}]}\n'
-        "أنشئ 6 شرائح متنوعة باللغة العربية الفصحى."
+        f"أنت خبير Power BI ومهندس ذكاء أعمال (BI Architect). للمشروع التالي: {msg}\n"
+        "أعدّ وثيقة هندسية تنفيذية تشمل:\n"
+        "1. هيكل الجداول المقترح (Fact & Dimension Tables) وأعمدة كل جدول.\n"
+        "2. 6 معادلات DAX احترافية مكتوبة بدقة وجاهزة للنسخ المباشر داخل Power BI لحساب المؤشرات (KPIs).\n"
+        "3. تصميم لوحة القيادة (Dashboard Layout) وتوزيع البطاقات والرسوم البيانية في كل صفحة."
     )
-    raw = ai_ask(msg, prompt, mode="arabic").replace("```json", "").replace("```", "").strip()
-    try:
-        data = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
-    except Exception:
-        data = {"subtitle": "عرض تحليلي واستراتيجي شامل", "slides": [{"heading": "نظرة عامة", "points": ["تحديد الأهداف الاستراتيجية", "تحليل الوضع الراهن", "رفع كفاءة الأداء"]}]}
+    guide = ai_ask(msg, prompt, temperature=0.2, mode="arabic")
 
-    prs = Presentation(); prs.slide_width = Inches(13.333); prs.slide_height = Inches(7.5)
-    blank = prs.slide_layouts[6]
-    NAVY, SLATE, GOLD, WHITE, LIGHT_BG, DARK_TXT = RGBColor(11, 25, 44), RGBColor(30, 62, 98), RGBColor(255, 209, 102), RGBColor(255, 255, 255), RGBColor(248, 250, 252), RGBColor(15, 23, 42)
+    doc = Document()
+    doc.styles['Normal'].font.name = 'Arial'
+    doc.styles['Normal'].font.size = DocPt(13)
 
-    def _add_p(tf, txt, sz, clr, bold=False, align=PP_ALIGN.RIGHT, sp=0, first=False):
-        p = tf.paragraphs[0] if first else tf.add_paragraph()
-        p.text, p.alignment, p.font.name, p.font.size, p.font.bold, p.font.color.rgb = txt, align, "Arial", Pt(sz), bold, clr
-        if sp: p.space_before = Pt(sp)
+    tbl = doc.add_table(rows=1, cols=1)
+    cell = tbl.cell(0, 0)
+    cell._tc.get_or_add_tcPr().append(parse_xml(f'<w:shd {nsdecls("w")} w:fill="0B192C"/>'))
+    p0 = cell.paragraphs[0]
+    _set_rtl(p0)
+    r0 = p0.add_run(f"دليل هندسة Power BI: {title}\n")
+    r0.font.name = 'Arial'; r0.font.size = DocPt(18); r0.font.bold = True; r0.font.color.rgb = RGBColor(255, 209, 102)
+    r1 = p0.add_run(f"تاريخ الإصدار: {today_dates()}  |  Albaraa AI OS")
+    r1.font.name = 'Arial'; r1.font.size = DocPt(11); r1.font.color.rgb = RGBColor(255, 255, 255)
 
-    s0 = prs.slides.add_slide(blank)
-    s0.background.fill.solid(); s0.background.fill.fore_color.rgb = NAVY
-    bar = s0.shapes.add_shape(1, Inches(0), Inches(6.8), Inches(13.333), Inches(0.2))
-    bar.fill.solid(); bar.fill.fore_color.rgb = GOLD; bar.line.fill.background()
+    for line in guide.split("\n"):
+        cl = line.strip().replace("**", "")
+        if not cl: continue
+        p = doc.add_paragraph()
+        _set_rtl(p)
+        run = p.add_run(cl.lstrip("# "))
+        run.font.name = 'Arial'
+        if cl.startswith(("#", "1.", "2.", "3.")):
+            run.font.size = DocPt(15); run.font.bold = True; run.font.color.rgb = RGBColor(11, 25, 44)
+        else:
+            run.font.size = DocPt(12.5); run.font.color.rgb = RGBColor(30, 41, 59)
 
-    tf0 = s0.shapes.add_textbox(Inches(1), Inches(2.2), Inches(11.333), Inches(2)).text_frame; tf0.word_wrap = True
-    _add_p(tf0, title, 40, GOLD, bold=True, first=True)
-    _add_p(tf0, data.get("subtitle", ""), 20, WHITE, sp=14)
-    _add_p(tf0, f"تاريخ الإصدار: {today_dates()} | Albaraa AI OS", 14, RGBColor(148, 163, 184), sp=28)
+    path = "/tmp/PowerBI_Architecture.docx"; doc.save(path)
+    send_file(cid, path, "PowerBI_Architecture.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", f"📈 تم إعداد حزمة هندسة Power BI ومعادلات DAX: *{title}*")
+    if os.path.exists(path): os.remove(path)
+    del doc; gc.collect()

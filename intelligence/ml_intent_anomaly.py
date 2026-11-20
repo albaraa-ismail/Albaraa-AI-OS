@@ -1,54 +1,86 @@
 import math
-import threading
-from collections import defaultdict
-from typing import List, Dict, Any
+import re
+from collections import Counter
+from typing import Dict, Any
 
 
-class ReinforcementLearningRouter:
-    """مسرّع التوجيه الذكي بالتعلم المعزّز (Upper Confidence Bound - UCB1)."""
+class MLIntentAndAnomalyEngine:
+    """مصنف النوايا وكشف الشذوذ الإحصائي بتعلّم الآلة (Multinomial Likelihood + Z-Score)."""
 
-    def __init__(self, exploration_c: float = 1.2):
-        self.c = exploration_c
-        self._q_values: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
-        self._counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
-        self._total_pulls: Dict[str, int] = defaultdict(int)
-        self._lock = threading.Lock()
+    TRAINING_CORPUS = {
+        "research": [
+            "ابحث", "بحث", "معلومات", "مصادر", "مراجع", "تحليل", "مقارنة", "تقرير",
+            "دراسة", "احصائيات", "إحصائيات", "اخبار", "أخبار", "تاريخ", "شرح", "فسر",
+        ],
+        "code": [
+            "برمج", "كود", "بايثون", "python", "sql", "api", "خطأ", "bug", "دالة",
+            "خوارزمية", "قاعدة بيانات", "سكريبت", "تطبيق", "موقع", "github", "html",
+        ],
+        "office": [
+            "وورد", "word", "اكسل", "إكسل", "excel", "بوربوينت", "pptx", "باور بي",
+            "power bi", "dax", "لوحة قيادة", "مؤشرات", "kpi", "رسم بياني", "عرض تقديمي",
+        ],
+        "voice": [
+            "صوت", "بصمة صوتية", "اقرأ بصوت", "تسجيل صوتي", "نطق", "تحدث",
+        ],
+        "robotics": [
+            "روبوت", "درون", "طائرة", "حساس", "أمر تحكم", "telemetry", "مسار", "حركة",
+        ],
+    }
 
-    def select_agent(self, state_intent: str, candidates: List[str]) -> str:
-        if not candidates:
-            return "general"
-        with self._lock:
-            total = self._total_pulls[state_intent]
-            for agent in candidates:
-                if self._counts[state_intent][agent] == 0:
-                    return agent
+    def __init__(self):
+        self._lengths = [25, 40, 60, 80, 120, 180, 250]
+        self._vocab = set(w for words in self.TRAINING_CORPUS.values() for w in words)
 
-            best_agent = candidates[0]
-            best_ucb = -1e9
-            for agent in candidates:
-                q = self._q_values[state_intent][agent]
-                n = self._counts[state_intent][agent]
-                bonus = self.c * math.sqrt(math.log(max(total, 1)) / n)
-                ucb = q + bonus
-                if ucb > best_ucb:
-                    best_ucb = ucb
-                    best_agent = agent
-            return best_agent
+    def _tokenize(self, text: str):
+        return re.findall(r"[\w\u0600-\u06FF]+", text.lower())
 
-    def update_reward(self, state_intent: str, agent: str, reward: float):
-        with self._lock:
-            self._total_pulls[state_intent] += 1
-            n = self._counts[state_intent][agent] + 1
-            self._counts[state_intent][agent] = n
-            old_q = self._q_values[state_intent][agent]
-            self._q_values[state_intent][agent] = old_q + (reward - old_q) / n
+    def _compute_z_score(self, length: int) -> float:
+        mean = sum(self._lengths) / len(self._lengths)
+        variance = sum((x - mean) ** 2 for x in self._lengths) / max(len(self._lengths), 1)
+        std = max(math.sqrt(variance), 15.0)
+        z = abs(length - mean) / std
+        if 5 <= length <= 1500:
+            self._lengths.append(length)
+            if len(self._lengths) > 200:
+                self._lengths.pop(0)
+        return round(z, 2)
 
-    def policy_snapshot(self) -> Dict[str, Any]:
-        with self._lock:
-            return {
-                state: {ag: round(val, 3) for ag, val in agents.items()}
-                for state, agents in self._q_values.items()
-            }
+    def predict(self, text: str) -> Dict[str, Any]:
+        tokens = self._tokenize(text)
+        token_counts = Counter(tokens)
+        v_size = max(len(self._vocab), 1)
+
+        scores = {}
+        for intent, keywords in self.TRAINING_CORPUS.items():
+            kw_set = set(keywords)
+            log_prob = math.log(1.0 / len(self.TRAINING_CORPUS))
+            hits = 0
+            for tok, cnt in token_counts.items():
+                if tok in kw_set or any(k in tok for k in kw_set if len(k) > 3):
+                    hits += cnt
+                    log_prob += cnt * math.log(2.0 / (len(keywords) + v_size))
+                else:
+                    log_prob += cnt * math.log(1.0 / (len(keywords) + v_size))
+            scores[intent] = (hits, log_prob)
+
+        best_intent = "general"
+        best_hits = 0
+        for intent, (hits, _) in scores.items():
+            if hits > best_hits:
+                best_hits = hits
+                best_intent = intent
+
+        z_score = self._compute_z_score(len(text))
+        unique_ratio = len(set(text)) / max(len(text), 1)
+        is_anomaly = (z_score > 4.5) or (len(text) > 30 and unique_ratio < 0.08)
+
+        return {
+            "intent": best_intent,
+            "confidence": round(min(0.55 + (best_hits * 0.15), 0.98), 2),
+            "is_anomaly": is_anomaly,
+            "anomaly_score": z_score,
+        }
 
 
-RL_ROUTER = ReinforcementLearningRouter()
+INTENT_CLASSIFIER = MLIntentAndAnomalyEngine()

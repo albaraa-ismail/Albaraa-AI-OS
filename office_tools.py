@@ -294,19 +294,7 @@ def make_pptx(cid, msg):
     ws_dash.merge_cells("B4:M4"); ws_dash["B4"] = f"تاريخ الإصدار: {today_dates()}  |  بطاقة الأداء المتوازن والمؤشرات التشغيلية"; ws_dash["B4"].fill = f_slate; ws_dash["B4"].font = Font(color="FFFFFF", size=11); ws_dash["B4"].alignment = aln_c
     for idx, sl in enumerate(data.get("slides", [])[:8], 1):
         slide = prs.slides.add_slide(blank)
-        slide.background.fill.solid(); slide.background.fill.fore_color.rgb = LIGHT_BG
-        hdr = slide.shapes.add_shape(1, Inches(0), Inches(0), Inches(13.333), Inches(1.2))
-        hdr.fill.solid(); hdr.fill.fore_color.rgb = NAVY; hdr.line.fill.background()
-
-        accent = slide.shapes.add_shape(1, Inches(0), Inches(1.2), Inches(13.333), Inches(0.08))
-        accent.fill.solid(); accent.fill.fore_color.rgb = GOLD; accent.line.fill.background()
-
-        htf = slide.shapes.add_textbox(Inches(0.8), Inches(0.25), Inches(11.7), Inches(0.7)).text_frame
-        _add_p(htf, f"{idx}. {sl.get('heading', '')}", 26, GOLD, bold=True, first=True)
-
-        btf = slide.shapes.add_textbox(Inches(1.0), Inches(1.8), Inches(11.3), Inches(4.8)).text_frame; btf.word_wrap = True
-        for p_i, pt_text in enumerate(sl.get("points", [])):
-            _add_p(btf, f"▪ {pt_text}", 20, DARK_TXT, first=(p_i == 0))
+           _add_p(btf, f"▪ {pt_text}", 20, DARK_TXT, first=(p_i == 0))
             btf.paragraphs[p_i].space_after = Pt(16)
 
         ftf = slide.shapes.add_textbox(Inches(0.8), Inches(6.9), Inches(11.7), Inches(0.4)).text_frame

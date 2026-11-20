@@ -1,50 +1,37 @@
-# الأداء والخادم
+# === 1. الخادم والأداء العالي (Web & Fast Serialization) ===
 flask
 gunicorn
 requests
-httpx
-aiohttp
+orjson
+cachetools
 
-# البحث واستخراج البيانات
+# === 2. الذكاء الاصطناعي والبحث الحي (AI & Search) ===
 duckduckgo-search
 beautifulsoup4
 lxml
-trafilatura
-youtube-transcript-api
+tenacity
 
-# حزمة مايكروسوفت أوفيس والبيانات
+# === 3. الأمن السيبراني والتشفير (Cybersecurity & Vault) ===
+cryptography
+pyjwt
+
+# === 4. الصوت السعودي البشري والوسائط (Voice & Vision) ===
+edge-tts
+pillow
+pypdf
 python-docx
 openpyxl
-xlsxwriter
-pandas
 python-pptx
 
-# الرسوم البيانية والباركود
+# === 5. علم البيانات، الإحصاء، والرسوم البيانية الاحترافية (Data Science & Charts) ===
+numpy
+pandas
+scipy
 matplotlib
 seaborn
-qrcode
 
-# التوقيت والتقويم الهجري
-pendulum
-python-dateutil
-hijridate
-
-# قراءة وإنشاء ملفات PDF
-pypdf
-pdfplumber
-reportlab
-fpdf2
-
-# الصوت البشري وإنتاج الفيديو
-edge-tts
-gTTS
-imageio-ffmpeg
-pydub
-
-# معالجة الصور والخطوط العربية
-Pillow
+# === 6. معالجة اللغة العربية والتقويم الهجري (Arabic NLP & Calendar) ===
 arabic-reshaper
 python-bidi
-moviepy
-imageio
-
+pendulum
+hijridate

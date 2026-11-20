@@ -12,6 +12,10 @@ EXECUTOR = ThreadPoolExecutor(max_workers=6)
 SEEN = set()
 LAST_TASK = {}
 
+ADMIN_PHONE = "".join(filter(str.isdigit, os.environ.get("ADMIN_PHONE", "")))
+AHMED_PHONE = "".join(filter(str.isdigit, os.environ.get("AHMED_PHONE", "")))
+ALLOWED_GROUP = os.environ.get("ALLOWED_GROUP", "").strip()
+
 _TW_CDN = "".join(["https:/", "/cdn.tailwindcss.", "com"])
 _CH_CDN = "".join(["https:/", "/cdn.jsdelivr.", "net/npm/chart.js"])
 _GF_CDN = "".join(["https:/", "/fonts.googleapis.", "com/css2?family=Cairo:wght@400;600;700&display=swap"])
@@ -29,7 +33,7 @@ def live_board(bid):
     if not res:
         return "<h2 dir='rtl'>⚠️ اللوحة غير موجودة</h2>", 404
 
-    board = json.loads(res[0]["lesson_learned"])
+    board = json.loads(res["lesson_learned"])
     cols = board.get("cols", ["البند", "القسم", "المحقق", "المستهدف", "الحالة"])
     rows = board.get("rows", [])
     ai_reply = ""
@@ -71,7 +75,7 @@ def live_board(bid):
         board["cols"], board["rows"] = cols, rows
         sb("PATCH", "self_learning_logs", {"lesson_learned": json.dumps(board, ensure_ascii=False)}, q=f"?id=eq.{bid}")
 
-    labels = [str(r[0]) for r in rows[:12] if r]
+    labels = [str(r) for r in rows[:12] if r]
     values = []
     for r in rows[:12]:
         num = 0
@@ -111,7 +115,6 @@ def live_board(bid):
         <div class='bg-slate-900 border border-slate-800 p-5 rounded-2xl'><p class='text-slate-400 text-xs'>متوسط المؤشر الرقمي</p><p class='text-3xl font-bold text-emerald-400 mt-1'>{avg_val}</p></div>
         <div class='bg-slate-900 border border-slate-800 p-5 rounded-2xl'><p class='text-slate-400 text-xs'>أعلى قيمة مسجلة</p><p class='text-3xl font-bold text-amber-400 mt-1'>{max_val}</p></div>
       </div>
-
       <div class='bg-gradient-to-l from-slate-900 to-indigo-950/40 border border-indigo-500/30 p-5 rounded-2xl mb-6 shadow-lg'>
         <form method='POST' class='flex flex-col md:flex-row gap-3'>
           <input name='q' placeholder='أعطِ الوكيل أمراً مباشراً (مثال: أضف 5 موظفين جدد لقسم التقنية أو عدّل إنجاز أحمد إلى 98%)...' class='flex-1 bg-slate-950/80 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-sky-500' required>
@@ -155,7 +158,7 @@ def export_board(bid):
     res = sb("GET", "self_learning_logs", q=f"?id=eq.{bid}")
     if not res:
         return "Not Found", 404
-    board = json.loads(res["lesson_learned"])
+    board = json.loads(res[0]["lesson_learned"])
     wb = Workbook(); ws = wb.active; ws.sheet_view.rightToLeft = True
     ws.append(board.get("cols", []))
     for r in board.get("rows", []): ws.append(r)
@@ -165,6 +168,7 @@ def export_board(bid):
 @app.route("/", methods=["GET"])
 def home():
     return "Albaraa AI OS Active", 200
+
 HELP_MENU = (
     "🤖 *منظومة Albaraa AI OS التنفيذية*\n\n"
     "📌 *القدرات والأدوات المتاحة حالياً:*\n"
@@ -180,6 +184,20 @@ HELP_MENU = (
     "• لحفظ قاعدة دائمة للمستقبل: ابدأ رسالتك بـ *(قاعدة: ...)* أو *(ملاحظة: ...)*\n"
     "• لتعديل آخر مخرج وإعادة إنتاجه فوراً: اكتب *(تعديل: ملاحظتك هنا)*"
 )
+def _is_authorized(cid: str, sender: str) -> bool:
+    # 1. المحادثة الخاصة للمشرف (أنت فقط في الخاص)
+    if "@c.us" in cid:
+        cid_digits = "".join(filter(str.isdigit, cid))
+        return bool(ADMIN_PHONE and ADMIN_PHONE in cid_digits)
+
+    # 2. القروب المشترك فقط (يقبل رسائلك ورسائل أحمد داخل القروب)
+    if "@g.us" in cid and ALLOWED_GROUP and ALLOWED_GROUP in cid:
+        sender_digits = "".join(filter(str.isdigit, sender))
+        if not sender_digits:
+            return True
+        return bool((ADMIN_PHONE and ADMIN_PHONE in sender_digits) or (AHMED_PHONE and AHMED_PHONE in sender_digits))
+
+    return False
 
 def _run_with_tip(fn, cid, task):
     fn(cid, task)
@@ -187,7 +205,7 @@ def _run_with_tip(fn, cid, task):
 
 def _dispatch_smart(cid: str, txt: str, sname: str):
     clean = txt.strip()
-    if clean in ("القائمة", "المساعدة", "الخدمات", "/help", "قدراتك", "ايش تقدر تسوي", "وش تقدر تسوي"):
+    if any(k in clean for k in ("القائمة", "المساعدة", "الخدمات", "/help", "قدراتك", "ايش تقدر تسوي", "وش تقدر تسوي")):
         send_msg(cid, HELP_MENU)
         return
 
@@ -240,17 +258,22 @@ def _dispatch_smart(cid: str, txt: str, sname: str):
 @app.route("/whatsapp-webhook", methods=["POST"])
 def webhook():
     data = request.json or {}
-    if data.get("typeWebhook") != "incomingMessageReceived":
+    wtype = data.get("typeWebhook", "")
+    if wtype not in ("incomingMessageReceived", "outgoingMessageReceived"):
         return jsonify({"status": "ignored"}), 200
     mid = data.get("idMessage", "")
     if _mark_seen(mid):
         return jsonify({"status": "dup"}), 200
+    sdata = data.get("senderData", {})
+    cid = sdata.get("chatId", "")
+    sender = sdata.get("sender", "")
+    if not _is_authorized(cid, sender):
+        return jsonify({"status": "unauthorized"}), 200
     mdata = data.get("messageData", {})
     txt = (mdata.get("textMessageData", {}).get("textMessage") or mdata.get("extendedTextMessageData", {}).get("text") or "").strip()
-    cid = data.get("senderData", {}).get("chatId", "")
-    sname = data.get("senderData", {}).get("senderName", "User")
+    sname = sdata.get("senderName", "User")
     if txt and cid and not any(txt.startswith(p) for p in ("🔍", "⚙️", "🛡️", "📑", "🌐", "🚀", "💻", "⚠", "✅", "🤖", "📊", "📄", "📽️", "👥", "💡", "🧠")):
-        print(f"IN: incomingMessageReceived | CID: {cid} | MSG: {txt[:25]}", flush=True)
+        print(f"IN: {wtype} | CID: {cid} | MSG: {txt[:25]}", flush=True)
         EXECUTOR.submit(_dispatch_smart, cid, txt, sname)
     return jsonify({"status": "ok"}), 200
 

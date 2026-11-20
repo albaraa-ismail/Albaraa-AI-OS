@@ -8,7 +8,7 @@ cachetools
 pydantic
 
 # === 2. الذكاء الاصطناعي والبحث الحي (AI & Search) ===
-duckduckgo-search
+ddgs
 beautifulsoup4
 lxml
 tenacity

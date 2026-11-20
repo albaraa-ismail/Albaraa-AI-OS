@@ -281,20 +281,21 @@ def make_pptx(cid, msg):
     _add_p(tf0, title, 40, GOLD, bold=True, first=True)
     _add_p(tf0, data.get("subtitle", ""), 20, WHITE, sp=14)
     _add_p(tf0, f"تاريخ الإصدار: {today_dates()} | Albaraa AI OS", 14, RGBColor(148, 163, 184), sp=28)
-    cnt = max(len(rows), 1); avg_pct = round(sum_pct / cnt, 1); tot_diff = round(sum_ac - sum_tg, 1)
-    tot_r = last_r + 1; ws_data.row_dimensions[tot_r].height = 30
-    tots = ["الإجمالي", f"{cnt} سجل", "كافة الفئات", "جميع الإدارات", round(sum_ac, 1), round(sum_tg, 1), f"{avg_pct}%", f"{'+' if tot_diff > 0 else ''}{tot_diff}", f"{pass_cnt} محقق", "المؤشر العام"]
-    for c_i, val in enumerate(tots, 1):
-        c = ws_data.cell(tot_r, c_i, val); c.fill = f_slate; c.font = Font(color="FFFFFF", size=11, bold=True); c.alignment = aln_c; c.border = brd
-
-    for c_i in range(1, 11): ws_data.column_dimensions[get_column_letter(c_i)].width = 25 if c_i in (2, 10) else (19 if c_i in (3, 4, 9) else 15)
-    for c in range(1, 14): ws_dash.column_dimensions[get_column_letter(c)].width = 14
-
-    ws_dash.merge_cells("B2:M3"); ws_dash["B2"] = f"لوحة القيادة التنفيذية: {title}"; ws_dash["B2"].fill = f_navy; ws_dash["B2"].font = Font(color="FFD166", size=18, bold=True); ws_dash["B2"].alignment = aln_c
-    ws_dash.merge_cells("B4:M4"); ws_dash["B4"] = f"تاريخ الإصدار: {today_dates()}  |  بطاقة الأداء المتوازن والمؤشرات التشغيلية"; ws_dash["B4"].fill = f_slate; ws_dash["B4"].font = Font(color="FFFFFF", size=11); ws_dash["B4"].alignment = aln_c
     for idx, sl in enumerate(data.get("slides", [])[:8], 1):
         slide = prs.slides.add_slide(blank)
-           _add_p(btf, f"▪ {pt_text}", 20, DARK_TXT, first=(p_i == 0))
+        slide.background.fill.solid(); slide.background.fill.fore_color.rgb = LIGHT_BG
+        hdr = slide.shapes.add_shape(1, Inches(0), Inches(0), Inches(13.333), Inches(1.2))
+        hdr.fill.solid(); hdr.fill.fore_color.rgb = NAVY; hdr.line.fill.background()
+
+        accent = slide.shapes.add_shape(1, Inches(0), Inches(1.2), Inches(13.333), Inches(0.08))
+        accent.fill.solid(); accent.fill.fore_color.rgb = GOLD; accent.line.fill.background()
+
+        htf = slide.shapes.add_textbox(Inches(0.8), Inches(0.25), Inches(11.7), Inches(0.7)).text_frame
+        _add_p(htf, f"{idx}. {sl.get('heading', '')}", 26, GOLD, bold=True, first=True)
+
+        btf = slide.shapes.add_textbox(Inches(1.0), Inches(1.8), Inches(11.3), Inches(4.8)).text_frame; btf.word_wrap = True
+        for p_i, pt_text in enumerate(sl.get("points", [])):
+            _add_p(btf, f"▪ {pt_text}", 20, DARK_TXT, first=(p_i == 0))
             btf.paragraphs[p_i].space_after = Pt(16)
 
         ftf = slide.shapes.add_textbox(Inches(0.8), Inches(6.9), Inches(11.7), Inches(0.4)).text_frame
@@ -329,7 +330,7 @@ def make_powerbi_kit(cid, msg):
     tbl = doc.add_table(rows=1, cols=1)
     cell = tbl.cell(0, 0)
     cell._tc.get_or_add_tcPr().append(parse_xml(f'<w:shd {nsdecls("w")} w:fill="0B192C"/>'))
-    p0 = cell.paragraphs[0]
+    p0 = cell.paragraphs
     _set_rtl(p0)
     r0 = p0.add_run(f"دليل هندسة Power BI: {title}\n")
     r0.font.name = 'Arial'; r0.font.size = DocPt(18); r0.font.bold = True; r0.font.color.rgb = RGBColor(255, 209, 102)

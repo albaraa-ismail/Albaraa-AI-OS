@@ -1,19 +1,26 @@
-import os
-import json
-import threading
-import io
+import os, json, io
+from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, jsonify, send_file
 from openpyxl import Workbook
-from core_ai import sb, ai_ask_json
+from core_ai import sb, ai_ask_json, send_msg
 from agent_brain import run_task
 from safe_guard import safe_run
+from office_tools import make_word, make_excel, make_pptx, make_powerbi_kit, make_kpi
 
 app = Flask(__name__)
+EXECUTOR = ThreadPoolExecutor(max_workers=6)
 SEEN = set()
 
 _TW_CDN = "".join(["https:/", "/cdn.tailwindcss.", "com"])
 _CH_CDN = "".join(["https:/", "/cdn.jsdelivr.", "net/npm/chart.js"])
 _GF_CDN = "".join(["https:/", "/fonts.googleapis.", "com/css2?family=Cairo:wght@400;600;700&display=swap"])
+
+def _mark_seen(mid: str) -> bool:
+    if not mid: return False
+    if mid in SEEN: return True
+    if len(SEEN) > 500: SEEN.clear()
+    SEEN.add(mid)
+    return False
 
 @app.route("/board/<int:bid>", methods=["GET", "POST"])
 def live_board(bid):
@@ -148,7 +155,7 @@ def export_board(bid):
     res = sb("GET", "self_learning_logs", q=f"?id=eq.{bid}")
     if not res:
         return "Not Found", 404
-    board = json.loads(res[0]["lesson_learned"])
+    board = json.loads(res["lesson_learned"])
     wb = Workbook(); ws = wb.active; ws.sheet_view.rightToLeft = True
     ws.append(board.get("cols", []))
     for r in board.get("rows", []): ws.append(r)
@@ -158,6 +165,51 @@ def export_board(bid):
 @app.route("/", methods=["GET"])
 def home():
     return "Albaraa AI OS Active", 200
+HELP_MENU = (
+    "🤖 *منظومة Albaraa AI OS التنفيذية*\n\n"
+    "📌 *القدرات والأدوات المتاحة حالياً:*\n"
+    "1️⃣ *تقارير Word احترافية:* اكتب (تقرير وورد عن...)\n"
+    "2️⃣ *لوحات قيادة Excel + رسوم بيانية:* اكتب (لوحة إكسل لـ...)\n"
+    "3️⃣ *عروض تقديمية PowerPoint:* اكتب (عرض بوربوينت عن...)\n"
+    "4️⃣ *لوحات Power BI حية + DAX:* اكتب (لوحة باور بي اي حية لـ...)\n"
+    "5️⃣ *حزمة هندسة Power BI:* اكتب (دليل باور بي اي لـ...)\n"
+    "6️⃣ *تنفيذ عدة مهام معاً:* اكتب طلباتك في سطور متعددة أو في جملة واحدة\n"
+    "7️⃣ *التعلم الذاتي:* ابدأ رسالتك بـ (ملاحظة: ... أو قاعدة: ...)\n"
+    "8️⃣ *تقرير قياس أداء النظام:* اكتب (تقرير الأداء)"
+)
+
+def _dispatch_smart(cid: str, txt: str, sname: str):
+    clean = txt.strip()
+    if clean in ("القائمة", "المساعدة", "الخدمات", "/help", "قدراتك", "ايش تقدر تسوي"):
+        send_msg(cid, HELP_MENU)
+        return
+
+    if clean in ("تقرير الأداء", "قياس الأداء", "kpi"):
+        safe_run(make_kpi, cid)
+        return
+
+    # دعم تقسيم الطلبات المتعددة في رسالة واحدة (بسطور جديدة أو علامة +)
+    sub_tasks = [t.strip() for t in clean.splitlines() if len(t.strip()) > 3]
+    if len(sub_tasks) == 1 and (" و" in clean) and sum(w in clean for w in ("وورد", "اكسل", "إكسل", "بوربوينت", "باور بي")) >= 2:
+        topic = clean.split("عن ", 1)[-1] if "عن " in clean else clean
+        sub_tasks = []
+        if "وورد" in clean: sub_tasks.append(f"تقرير وورد عن {topic}")
+        if any(k in clean for k in ("اكسل", "إكسل")): sub_tasks.append(f"لوحة إكسل عن {topic}")
+        if "بوربوينت" in clean: sub_tasks.append(f"عرض بوربوينت عن {topic}")
+        if "باور بي" in clean: sub_tasks.append(f"دليل باور بي اي عن {topic}")
+
+    for task in (sub_tasks or [clean])[:4]:
+        low = task.lower()
+        if any(k in low for k in ("تقرير وورد", "ملف وورد", "word")) and not any(k in low for k in ("باور بي", "power bi", "حية")):
+            EXECUTOR.submit(safe_run, make_word, cid, task)
+        elif any(k in low for k in ("لوحة اكسل", "لوحة إكسل", "ملف اكسل", "ملف إكسل", "excel")):
+            EXECUTOR.submit(safe_run, make_excel, cid, task)
+        elif any(k in low for k in ("بوربوينت", "عرض تقديمي", "شرائح", "pptx", "powerpoint")):
+            EXECUTOR.submit(safe_run, make_pptx, cid, task)
+        elif any(k in low for k in ("دليل باور بي", "هندسة باور بي", "dax")):
+            EXECUTOR.submit(safe_run, make_powerbi_kit, cid, task)
+        else:
+            EXECUTOR.submit(safe_run, run_task, cid, task, "admin", sname)
 
 @app.route("/whatsapp-webhook", methods=["POST"])
 def webhook():
@@ -165,18 +217,15 @@ def webhook():
     if data.get("typeWebhook") != "incomingMessageReceived":
         return jsonify({"status": "ignored"}), 200
     mid = data.get("idMessage", "")
-    if not mid or mid in SEEN:
+    if _mark_seen(mid):
         return jsonify({"status": "dup"}), 200
-    if len(SEEN) > 2000:
-        SEEN.clear()
-    SEEN.add(mid)
     mdata = data.get("messageData", {})
     txt = (mdata.get("textMessageData", {}).get("textMessage") or mdata.get("extendedTextMessageData", {}).get("text") or "").strip()
     cid = data.get("senderData", {}).get("chatId", "")
     sname = data.get("senderData", {}).get("senderName", "User")
-    if txt and cid and not any(txt.startswith(p) for p in ("🔍", "⚙️", "🛡️", "📑", "🌐", "🚀", "💻", "⚠", "✅", "🤖")):
-        print(f"IN: incomingMessageReceived | CID: {cid} | MSG: {txt[:20]}", flush=True)
-        threading.Thread(target=safe_run, args=(run_task, cid, txt, "admin", sname), daemon=True).start()
+    if txt and cid and not any(txt.startswith(p) for p in ("🔍", "⚙️", "🛡️", "📑", "🌐", "🚀", "💻", "⚠", "✅", "🤖", "📊", "📄", "📽️", "👥")):
+        print(f"IN: incomingMessageReceived | CID: {cid} | MSG: {txt[:25]}", flush=True)
+        EXECUTOR.submit(_dispatch_smart, cid, txt, sname)
     return jsonify({"status": "ok"}), 200
 
 if __name__ == "__main__":

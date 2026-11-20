@@ -1,11 +1,14 @@
 import os, json, requests
 
+SESSION = requests.Session()
+
 _D_GURL = "".join(["https:/", "/api.green-api.", "com"])
 GEMINI_BASE_URL = "".join(["https:/", "/generativelanguage.googleapis.", "com/v1beta/models/"])
 _OR_URL = "".join(["https:/", "/openrouter.", "ai/api/v1/chat/completions"])
 _GROQ_URL = "".join(["https:/", "/api.groq.", "com/openai/v1/chat/completions"])
 _SN_URL = "".join(["https:/", "/api.sambanova.", "ai/v1/chat/completions"])
 _CO_URL = "".join(["https:/", "/api.cohere.", "ai/compatibility/v1/chat/completions"])
+_CF_BASE = "".join(["https:/", "/api.cloudflare.", "com/client/v4/accounts/"])
 
 SB_URL = os.environ.get("SUPABASE_URL", "").strip()
 SB_KEY = os.environ.get("SUPABASE_KEY", "").strip()
@@ -73,14 +76,12 @@ def ai_ask(prompt: str, system_prompt: str = "", temperature: float = 0.3, mode:
     safe_prompt = prompt[:28000]
     hint = (system_prompt + " " + prompt[:200]).lower()
 
-    # تحديد المسار الذكي حسب نوع المهمة
     is_arabic_heavy = mode == "arabic" or any(k in hint for k in ("فصحى", "تقرير", "محور", "مستند", "وثيقة", "شرائح", "استراتيجي", "خطة", "توصيات"))
     is_fast_code = mode == "fast" or any(k in hint for k in ("json", "كود", "برمجة", "html", "python", "dax", "جدول"))
 
-    cf_url = f"https://cloudflare.com{CF_ACC}/ai/v1/chat/completions" if CF_ACC else ""
-    or_hdr = {"HTTP-Referer": "https://onrender.com", "X-Title": "Albaraa AI OS"}
+    cf_url = f"{_CF_BASE}{CF_ACC}/ai/v1/chat/completions" if CF_ACC else ""
+    or_hdr = {"HTTP-Referer": "https://albaraa-ai-os.onrender.com", "X-Title": "Albaraa AI OS"}
 
-    # تعريف المحركات المتاحة
     engines = {
         "groq": [(k, _GROQ_URL, ("llama-3.3-70b-versatile", "qwen-qwq-32b", "llama-3.1-8b-instant"), 30, None) for k in GROQ_KEYS],
         "sn": [(k, _SN_URL, ("Qwen2.5-72B-Instruct", "Meta-Llama-3.3-70B-Instruct", "DeepSeek-V3-0324"), 35, None) for k in SN_KEYS],
@@ -89,7 +90,6 @@ def ai_ask(prompt: str, system_prompt: str = "", temperature: float = 0.3, mode:
         "or": [(k, _OR_URL, ("google/gemma-4-31b-it:free", "nvidia/nemotron-3-ultra-550b-a55b:free", "openrouter/free"), 45, or_hdr) for k in OR_KEYS]
     }
 
-    # ترتيب الأولوية ديناميكياً حسب المهمة (التوجيه الذكي)
     if is_arabic_heavy and not is_fast_code:
         order = ("co", "sn", "groq", "cf", "or")
     else:

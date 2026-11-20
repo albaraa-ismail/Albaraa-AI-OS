@@ -1,4 +1,4 @@
-import os, re, gc, pendulum
+import os, re, gc, io, requests, pendulum
 from hijridate import Gregorian
 from core.core_ai import sb, ai_ask, send_msg, send_file
 from core.event_bus import BUS
@@ -9,12 +9,34 @@ def today_dates():
     return f"{h.day}/{h.month}/{h.year}هـ - {now.format('YYYY/MM/DD')}م"
 
 def _clean_title(msg):
-    t = ai_ask(msg, "حول الطلب إلى عنوان تقرير مؤسسي فخم من 3 إلى 6 كلمات بدون أفعال أمر. العنوان فقط:").replace('"', '').strip()[:60]
+    t = ai_ask(msg, "حول الطلب إلى عنوان تقرير مؤسسي أو أكاديمي فخم من 3 إلى 7 كلمات بدون أفعال أمر. العنوان فقط:").replace('"', '').strip()[:65]
     if "تعذر" in t or len(t) < 4:
         for w in ("عطني", "أعطني", "اعطني", "صمم", "اكتب", "سوي", "اعمل", "أريد", "ابي", "أبي", "لوحة تحكم"):
             msg = msg.replace(w, "")
-        t = msg.strip()[:55] or "منظومة مؤشرات الأداء المؤسسي"
+        t = msg.strip()[:55] or "تقرير الأداء والتحليل الاستراتيجي"
     return t
+
+def _detect_font(msg: str) -> str:
+    low = msg.lower()
+    if "cairo" in low or "كايرو" in low: return "Cairo"
+    if "tajawal" in low or "تجول" in low: return "Tajawal"
+    if "amiri" in low or "أميري" in low: return "Amiri"
+    if any(k in low for k in ("بحث", "علمي", "أكاديمي", "اكاديمي", "دراسة", "مرجع")): return "Traditional Arabic"
+    return "Arial"
+
+def _fetch_visual(query: str, out_path: str) -> str:
+    try:
+        en_q = ai_ask(query, "Translate this topic into 2 simple English keywords for an image search. Keywords only:", mode="fast").strip()
+        clean_q = re.sub(r'[^a-zA-Z0-9\s]', '', en_q).strip().replace(" ", ",") or "business,analytics"
+        url = f"https://loremflickr.com{clean_q}"
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200 and len(r.content) > 2000:
+            with open(out_path, "wb") as f:
+                f.write(r.content)
+            return out_path
+    except Exception:
+        pass
+    return ""
 
 def _set_rtl(p):
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -24,29 +46,45 @@ def _set_rtl(p):
 
 def make_kpi(cid):
     import openpyxl
-    wb = openpyxl.Workbook(); ws = wb.active; ws.sheet_view.rightToLeft = True
+    wb = openpyxl.Workbook()
+    wb.properties.creator = ""
+    ws = wb.active; ws.sheet_view.rightToLeft = True
     ws.append(["رقم العملية", "المستخدم", "القسم", "زمن التنفيذ(ث)", "الوقت الموفر(د)", "مؤشر التطور%", "المخرج"])
     for i in sb("GET", "telemetry_kpis", q="?order=id.desc&limit=50"):
         ws.append([i.get("id"), i.get("user_role"), i.get("unit_used"), i.get("response_time_sec"), i.get("time_saved_min"), i.get("user_growth_score"), i.get("deliverable_type")])
     path = "/tmp/KPI.xlsx"; wb.save(path)
-    send_file(cid, path, "Performance_Report.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"📊 تقرير قياس الأداء ({today_dates()})")
+    send_file(cid, path, "Performance_Report.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"📊 تقرير قياس الأداء والتطور ({today_dates()})")
     BUS.publish("office.kpi_exported", {"cid": cid})
     if os.path.exists(path): os.remove(path)
     del wb; gc.collect()
 
 def make_word(cid, msg):
     from docx import Document
-    from docx.shared import Pt as DocPt, RGBColor
+    from docx.shared import Pt as DocPt, RGBColor, Inches
     from docx.oxml import parse_xml
     from docx.oxml.ns import nsdecls
 
-    send_msg(cid, "👥 *تفعيل غرفة عمليات الوثائق:* جاري هندسة التقرير المؤسسي وتنسيق الهوية البصرية...")
+    is_academic = any(k in msg for k in ("بحث", "علمي", "أكاديمي", "اكاديمي", "دراسة", "دراسات سابقة", "مراجع"))
+    font_name = _detect_font(msg)
+    send_msg(cid, "📄 جاري إعداد الوثيقة وتنسيق الجداول والصور وفق المعايير المطلوبة...")
     title = _clean_title(msg)
-    outline = ai_ask(msg, "ضع 5 محاور استراتيجية لتغطية هذا الموضوع بعمق تنفيذي. اكتب كل محور في سطر مستقل بدون مقدمات:", mode="arabic")
-    sections = [re.sub(r'^[\-\*\#\d\.\s]+', '', s).strip() for s in outline.split("\n") if len(s.strip()) > 3][:5] or ["الإطار العام والرؤية", "التحليل التشغيلي", "آليات التنفيذ", "مؤشرات القياس", "التوصيات الاستراتيجية"]
+
+    if is_academic:
+        sections = [
+            "الملخص التنفيذي ومشكلة البحث",
+            "الإطار النظري والدراسات السابقة",
+            "منهجية البحث وأدوات التحليل",
+            "النتائج والمناقشة العلمية",
+            "الخاتمة والتوصيات وقائمة المراجع"
+        ]
+    else:
+        outline = ai_ask(msg, "ضع 5 محاور استراتيجية لتغطية هذا الموضوع بعمق تنفيذي. اكتب كل محور في سطر مستقل بدون مقدمات:", mode="arabic")
+        sections = [re.sub(r'^[\-\*\#\d\.\s]+', '', s).strip() for s in outline.split("\n") if len(s.strip()) > 3][:5] or ["الإطار العام والرؤية", "التحليل التشغيلي", "آليات التنفيذ", "مؤشرات القياس", "التوصيات الاستراتيجية"]
 
     doc = Document()
-    doc.styles['Normal'].font.name = 'Arial'
+    doc.core_properties.author = ""
+    doc.core_properties.last_modified_by = ""
+    doc.styles['Normal'].font.name = font_name
     doc.styles['Normal'].font.size = DocPt(13)
     doc.styles['Normal'].font.color.rgb = RGBColor(30, 41, 59)
 
@@ -58,9 +96,9 @@ def make_word(cid, msg):
         _set_rtl(p)
         p.paragraph_format.space_before = DocPt(space_before)
         p.paragraph_format.space_after = DocPt(space_after)
-        p.paragraph_format.line_spacing = 1.35
+        p.paragraph_format.line_spacing = 1.4
         run = p.add_run(text)
-        run.font.name = 'Arial'
+        run.font.name = font_name
         run.font.size = DocPt(size)
         run.font.bold = bold
         run.font.color.rgb = RGBColor(*color)
@@ -73,13 +111,23 @@ def make_word(cid, msg):
     _shade(c0, "0B192C")
     _shade(c1, "1E3E62")
     _styled_p(c0.paragraphs[0], title, size=22, bold=True, color=(255, 209, 102), space_before=8, space_after=8)
-    _styled_p(c1.paragraphs[0], f"تاريخ الإصدار: {today_dates()}   |   إعداد: منظومة Albaraa AI OS", size=11, bold=False, color=(255, 255, 255), space_before=4, space_after=4)
+    doc_type_lbl = "دراسة بحثية علمية محكّمة" if is_academic else "تقرير تحليلي وتنفيذي شامل"
+    _styled_p(c1.paragraphs[0], f"تاريخ الإصدار: {today_dates()}   |   {doc_type_lbl}", size=11, bold=False, color=(255, 255, 255), space_before=4, space_after=4)
+
+    cover_img = _fetch_visual(title, "/tmp/word_cover.jpg")
+    if cover_img and os.path.exists(cover_img):
+        try:
+            p_img = doc.add_paragraph()
+            _set_rtl(p_img)
+            p_img.add_run().add_picture(cover_img, width=Inches(6.2))
+        except Exception:
+            pass
 
     doc.add_paragraph()
     tbl_idx = doc.add_table(rows=len(sections) + 1, cols=2)
     tbl_idx.style = 'Table Grid'
     _shade(tbl_idx.cell(0, 0), "0B192C"); _shade(tbl_idx.cell(0, 1), "0B192C")
-    _styled_p(tbl_idx.cell(0, 0).paragraphs[0], "المحور الاستراتيجي", size=12, bold=True, color=(255, 209, 102), space_before=3, space_after=3)
+    _styled_p(tbl_idx.cell(0, 0).paragraphs[0], "المحور / الفصل", size=12, bold=True, color=(255, 209, 102), space_before=3, space_after=3)
     _styled_p(tbl_idx.cell(0, 1).paragraphs[0], "الرقم", size=12, bold=True, color=(255, 209, 102), space_before=3, space_after=3)
     for i, sec in enumerate(sections, 1):
         bg = "F8FAFC" if i % 2 == 0 else "FFFFFF"
@@ -87,13 +135,15 @@ def make_word(cid, msg):
         _styled_p(tbl_idx.cell(i, 0).paragraphs[0], sec, size=12, bold=True, color=(15, 23, 42), space_before=2, space_after=2)
         _styled_p(tbl_idx.cell(i, 1).paragraphs[0], f"0{i}", size=12, bold=True, color=(30, 62, 98), space_before=2, space_after=2)
 
+    sec_sys_prompt = (
+        "اكتب بحثاً أكاديمياً رصيناً باللغة العربية الفصحى بأسلوب علمي موثق، مع ذكر الدراسات السابقة والمراجع العلمية بنظام APA في الفصل الأخير:"
+        if is_academic else
+        "اكتب تحليلاً تنفيذياً منظماً باللغة العربية الفصحى مقسماً إلى فقرات قصيرة ونقاط عملية واضحة تبدأ بـ (▪). تجنب الحشو والتكرار:"
+    )
+
     for idx, sec in enumerate(sections, 1):
         _styled_p(doc, f"{idx}. {sec}", size=17, bold=True, color=(11, 25, 44), space_before=16, space_after=6)
-        content = ai_ask(
-            f"الموضوع الرئيسي: {title}\nالمحور الحالي: {sec}",
-            "اكتب تحليلاً تنفيذياً منظماً باللغة العربية الفصحى مقسماً إلى فقرات قصيرة ونقاط عملية واضحة تبدأ بـ (▪). تجنب الحشو والتكرار:",
-            mode="arabic"
-        )
+        content = ai_ask(f"الموضوع الرئيسي: {title}\nالمحور الحالي: {sec}\nمتطلبات إضافية: {msg}", sec_sys_prompt, mode="arabic")
         for l in content.split("\n"):
             cl = l.strip().replace("**", "")
             if not cl: continue
@@ -105,8 +155,13 @@ def make_word(cid, msg):
             else:
                 _styled_p(doc, cl, size=13, bold=False, color=(30, 41, 59), space_before=2, space_after=6)
 
-    path = "/tmp/Doc.docx"; doc.save(path)
-    send_file(cid, path, "Executive_Report.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", f"📄 تم إصدار التقرير التنفيذي المنسّق: *{title}*")
+    if cover_img and os.path.exists(cover_img):
+        os.remove(cover_img)
+
+    safe_fname = re.sub(r'[^\w\s-]', '', title).strip().replace(" ", "_") or "Report"
+    path = f"/tmp/{safe_fname}.docx"; doc.save(path)
+    doc_caption = f"📚 تم إعداد الدراسة العلمية الموثقة: *{title}*" if is_academic else f"📄 تم إصدار التقرير التنفيذي المنسّق: *{title}*"
+    send_file(cid, path, f"{safe_fname}.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", doc_caption)
     BUS.publish("office.word_exported", {"cid": cid, "title": title})
     if os.path.exists(path): os.remove(path)
     del doc; gc.collect()
@@ -122,10 +177,10 @@ def make_excel(cid, msg):
 
     def _ar(txt):
         return get_display(arabic_reshaper.reshape(str(txt)), base_dir='R')
-    send_msg(cid, "👥 *هندسة لوحة القيادة المؤسسية:* جاري بناء قاعدة البيانات، المؤشرات، والرسوم البيانية...")
+    send_msg(cid, "📊 جاري إعداد ملف الإكسل ولوحة المؤشرات والرسوم البيانية...")
     prompt = (
-        "أنت مدير تحليلات أداء مؤسسي. أنشئ 3 أقسام مفصولة بسطر === فقط:\n"
-        "1: عنوان مؤسسي رسمي للتقرير (3 إلى 6 كلمات بدون أفعال أمر).\n"
+        "أنت محلل بيانات وخبير تصميم لوحات قيادة Excel. أنشئ 3 أقسام مفصولة بسطر === فقط:\n"
+        "1: عنوان رسمي للتقرير (3 إلى 6 كلمات بدون أفعال أمر).\n"
         "2: جدول بيانات من 9 صفوف (صف عناوين + 8 صفوف بيانات واقعية) بـ 6 أعمدة مفصولة بـ | فقط:\n"
         "الاسم أو البند | المسمى الوظيفي | الإدارة | المحقق الفعلي (رقم 75-115) | المستهدف (رقم 85-100) | الإجراء التطويري\n"
         "3: ملخص تنفيذي من 3 توصيات استراتيجية بدون رموز نجمية.\n"
@@ -134,11 +189,13 @@ def make_excel(cid, msg):
     res = ai_ask(msg, prompt, mode="fast")
     it_p = iter([p.strip() for p in res.split("===") if p.strip()])
     p1, p2, p3 = next(it_p, ""), next(it_p, ""), next(it_p, "")
-    title = p1.replace('"', '').strip()[:55] if (p1 and len(p1) < 85 and "|" not in p1) else "تقرير تقييم الأداء والكفاءة المؤسسية"
+    title = p1.replace('"', '').strip()[:55] if (p1 and len(p1) < 85 and "|" not in p1) else "تقرير تقييم الأداء والكفاءة"
     raw = p2 if "|" in p2 else res
     summary = p3 or "1. تعزيز برامج التطوير المهني للوحدات دون المستهدف.\n2. ربط الحوافز الفصلية بمؤشرات الإنجاز الفعلية.\n3. تعميم أفضل الممارسات التشغيلية."
 
     wb = openpyxl.Workbook()
+    wb.properties.creator = ""
+    wb.properties.lastModifiedBy = ""
     ws_dash = wb.active; ws_dash.title = "لوحة القيادة"; ws_dash.sheet_view.rightToLeft = True; ws_dash.sheet_view.showGridLines = False
     ws_data = wb.create_sheet("سجل البيانات والتحليل"); ws_data.sheet_view.rightToLeft = True
 
@@ -164,7 +221,7 @@ def make_excel(cid, msg):
     if len(parsed) < 2:
         parsed = [["الاسم", "المسمى", "الإدارة", "المحقق", "المستهدف", "الإجراء"], ["سارة القحطاني", "أخصائي أول", "الموارد البشرية", 98, 90, "ترشيح للقيادة"], ["عبدالله العتيبي", "مهندس مشاريع", "العمليات", 92, 95, "تحسين الجدولة"], ["نورة الشمري", "محلل مالي", "المالية", 104, 100, "تعميم النموذج"]]
 
-    headers = ["الرقم الوظيفي", "الاسم / البند", "المسمى الوظيفي", "الإدارة", "المحقق الفعلي", "المستهدف", "الإنجاز %", "الفارق", "التقييم المعتمد", "خطة التطوير"]
+    headers = ["الرقم المرجعي", "الاسم / البند", "التصنيف / المسمى", "القسم / الإدارة", "المحقق الفعلي", "المستهدف", "الإنجاز %", "الفارق", "التقييم المعتمد", "خطة التطوير"]
     ws_data.row_dimensions[1].height = 32
     for c_i, h in enumerate(headers, 1):
         c = ws_data.cell(1, c_i, h); c.fill = f_navy; c.font = Font(color="FFD166", size=11, bold=True); c.alignment = aln_c; c.border = brd
@@ -176,7 +233,7 @@ def make_excel(cid, msg):
     for idx, r in enumerate(rows, 2):
         ws_data.row_dimensions[idx].height = 26
         it_c = iter(r)
-        nm, role_t, dp = str(next(it_c, "موظف")), str(next(it_c, "أخصائي")), str(next(it_c, "العمليات"))
+        nm, role_t, dp = str(next(it_c, "بند")), str(next(it_c, "أخصائي")), str(next(it_c, "العمليات"))
         raw_ac, raw_tg, act_plan = next(it_c, 88), next(it_c, 90), str(next(it_c, "متابعة دورية"))
         ac = raw_ac if isinstance(raw_ac, (int, float)) else 88
         tg = raw_tg if isinstance(raw_tg, (int, float)) else 90
@@ -186,24 +243,23 @@ def make_excel(cid, msg):
         if pct >= 85: pass_cnt += 1
         if len(chart_labels) < 7:
             chart_labels.append(_ar(nm[:13])); chart_act.append(ac); chart_tgt.append(tg)
-        entries = [f"EMP-{100+idx}", nm, role_t, dp, ac, tg, f"{pct}%", f"{'+' if diff > 0 else ''}{diff}", eval_txt, act_plan]
+        entries = [f"REF-{100+idx}", nm, role_t, dp, ac, tg, f"=ROUND((E{idx}/MAX(F{idx},1))*100,1)&\"%\"", f"=ROUND(E{idx}-F{idx},1)", eval_txt, act_plan]
         for c_i, val in enumerate(entries, 1):
             c = ws_data.cell(idx, c_i, val); c.border = brd; c.font = Font(color="0F172A", size=11, bold=(c_i in (1, 2, 7, 9))); c.alignment = aln_c if c_i in (1, 5, 6, 7, 8, 9) else aln_r
             if idx % 2 == 0: c.fill = f_zebra
             if c_i == 9: c.fill = f_green if pct >= 100 else (f_blue if pct >= 85 else f_amber)
     cnt = max(len(rows), 1); avg_pct = round(sum_pct / cnt, 1); tot_diff = round(sum_ac - sum_tg, 1)
     tot_r = last_r + 1; ws_data.row_dimensions[tot_r].height = 30
-    tots = ["الإجمالي", f"{cnt} سجل", "كافة الفئات", "جميع الإدارات", round(sum_ac, 1), round(sum_tg, 1), f"{avg_pct}%", f"{'+' if tot_diff > 0 else ''}{tot_diff}", f"{pass_cnt} محقق", "المؤشر العام"]
+    tots = ["الإجمالي", f"{cnt} سجل", "كافة الفئات", "جميع الإدارات", f"=SUM(E2:E{last_r})", f"=SUM(F2:F{last_r})", f"{avg_pct}%", f"=SUM(H2:H{last_r})", f"{pass_cnt} محقق", "المؤشر العام"]
     for c_i, val in enumerate(tots, 1):
         c = ws_data.cell(tot_r, c_i, val); c.fill = f_slate; c.font = Font(color="FFFFFF", size=11, bold=True); c.alignment = aln_c; c.border = brd
-
     for c_i in range(1, 11): ws_data.column_dimensions[get_column_letter(c_i)].width = 25 if c_i in (2, 10) else (19 if c_i in (3, 4, 9) else 15)
     for c in range(1, 14): ws_dash.column_dimensions[get_column_letter(c)].width = 14
 
     ws_dash.merge_cells("B2:M3"); ws_dash["B2"] = f"لوحة القيادة التنفيذية: {title}"; ws_dash["B2"].fill = f_navy; ws_dash["B2"].font = Font(color="FFD166", size=18, bold=True); ws_dash["B2"].alignment = aln_c
     ws_dash.merge_cells("B4:M4"); ws_dash["B4"] = f"تاريخ الإصدار: {today_dates()}  |  بطاقة الأداء المتوازن والمؤشرات التشغيلية"; ws_dash["B4"].fill = f_slate; ws_dash["B4"].font = Font(color="FFFFFF", size=11); ws_dash["B4"].alignment = aln_c
 
-    cards = [("B", "D", "إجمالي الأداء المحقق", f"{round(sum_ac, 1)}", "1E3A8A"), ("E", "G", "متوسط نسبة الإنجاز", f"{avg_pct}%", "0F766E"), ("H", "J", "الفارق عن المستهدف", f"{'+' if tot_diff > 0 else ''}{tot_diff}", "B45309"), ("K", "M", "نسبة المحققين للمعيار", f"{round((pass_cnt/cnt)*100)}%", "4338CA")]
+    cards = [("B", "D", "إجمالي الأداء المحقق", f"=SUM('سجل البيانات والتحليل'!E2:E{last_r})", "1E3A8A"), ("E", "G", "متوسط نسبة الإنجاز", f"{avg_pct}%", "0F766E"), ("H", "J", "الفارق عن المستهدف", f"=SUM('سجل البيانات والتحليل'!H2:H{last_r})", "B45309"), ("K", "M", "نسبة المحققين للمعيار", f"{round((pass_cnt/cnt)*100)}%", "4338CA")]
     ws_dash.row_dimensions[6].height = 26; ws_dash.row_dimensions[7].height = 40
     for cs, ce, tk, fk, hx in cards:
         ws_dash.merge_cells(f"{cs}6:{ce}6"); ws_dash.merge_cells(f"{cs}7:{ce}7")
@@ -233,17 +289,19 @@ def make_excel(cid, msg):
     except Exception as e: print("Chart Img Err:", e, flush=True)
 
     clean_sum = summary.replace("**", "").replace("###", "").replace("##", "").strip()
-    ws_dash.merge_cells("B27:M27"); ws_dash["B27"] = "💡 القراءة التحليلية والتوصيات التنفيذية للإدارة"; ws_dash["B27"].fill = f_navy; ws_dash["B27"].font = Font(color="FFD166", size=12, bold=True); ws_dash["B27"].alignment = aln_r
+    ws_dash.merge_cells("B27:M27"); ws_dash["B27"] = "💡 القراءة التحليلية والتوصيات التنفيذية"; ws_dash["B27"].fill = f_navy; ws_dash["B27"].font = Font(color="FFD166", size=12, bold=True); ws_dash["B27"].alignment = aln_r
     ws_dash.row_dimensions[28].height = 28
     ws_dash.merge_cells("B28:M33"); ws_dash["B28"] = clean_sum; ws_dash["B28"].fill = f_white; ws_dash["B28"].font = Font(color="1E293B", size=11); ws_dash["B28"].alignment = Alignment(horizontal="right", vertical="top", wrap_text=True); ws_dash["B28"].border = brd
 
-    path = "/tmp/Executive_Dashboard.xlsx"; wb.save(path)
-    send_file(cid, path, "Executive_Dashboard.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"📊 تم إعداد لوحة القيادة المؤسسية: *{title}*\n✨ تشمل: 4 بطاقات مؤشرات + سجل الموظفين وخطة التطوير.")
+    safe_fname = re.sub(r'[^\w\s-]', '', title).strip().replace(" ", "_") or "Dashboard"
+    path = f"/tmp/{safe_fname}.xlsx"; wb.save(path)
+    send_file(cid, path, f"{safe_fname}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"📊 تم إعداد لوحة القيادة: *{title}*\n✨ تشمل: بطاقات المؤشرات التفاعلية + سجل البيانات وخطة التطوير.")
     BUS.publish("office.excel_exported", {"cid": cid, "title": title})
     if os.path.exists(chart_img): send_file(cid, chart_img, "Performance_Chart.png", "image/png", f"📈 الرسم البياني لمؤشرات: *{title}*")
     for f in (path, chart_img):
         if os.path.exists(f): os.remove(f)
     del wb; gc.collect()
+
 def make_pptx(cid, msg):
     import json
     from pptx import Presentation
@@ -251,7 +309,8 @@ def make_pptx(cid, msg):
     from pptx.dml.color import RGBColor
     from pptx.enum.text import PP_ALIGN
 
-    send_msg(cid, "📊 *تفعيل استوديو العروض التقديمية:* جاري تصميم الشرائح وتنسيق الهوية البصرية...")
+    font_name = _detect_font(msg)
+    send_msg(cid, "📊 جاري تصميم العرض التقديمي وتنسيق الشرائح والصور...")
     title = _clean_title(msg)
     prompt = (
         f"أنت خبير تصميم عروض تقديمية تنفيذية. أنشئ محتوى عرض تقديمي احترافي حول: {msg}\n"
@@ -264,15 +323,17 @@ def make_pptx(cid, msg):
     except Exception:
         data = {"subtitle": "عرض تحليلي واستراتيجي شامل", "slides": [{"heading": "نظرة عامة", "points": ["تحديد الأهداف الاستراتيجية", "تحليل الوضع الراهن", "رفع كفاءة الأداء"]}]}
 
-    prs = Presentation(); prs.slide_width = Inches(13.333); prs.slide_height = Inches(7.5)
+    prs = Presentation()
+    prs.core_properties.author = ""
+    prs.core_properties.last_modified_by = ""
+    prs.slide_width = Inches(13.333); prs.slide_height = Inches(7.5)
     blank = prs.slide_layouts[6]
     NAVY, SLATE, GOLD, WHITE, LIGHT_BG, DARK_TXT = RGBColor(11, 25, 44), RGBColor(30, 62, 98), RGBColor(255, 209, 102), RGBColor(255, 255, 255), RGBColor(248, 250, 252), RGBColor(15, 23, 42)
 
     def _add_p(tf, txt, sz, clr, bold=False, align=PP_ALIGN.RIGHT, sp=0, first=False):
         p = tf.paragraphs[0] if first else tf.add_paragraph()
-        p.text, p.alignment, p.font.name, p.font.size, p.font.bold, p.font.color.rgb = txt, align, "Arial", Pt(sz), bold, clr
+        p.text, p.alignment, p.font.name, p.font.size, p.font.bold, p.font.color.rgb = txt, align, font_name, Pt(sz), bold, clr
         if sp: p.space_before = Pt(sp)
-
     s0 = prs.slides.add_slide(blank)
     s0.background.fill.solid(); s0.background.fill.fore_color.rgb = NAVY
     bar = s0.shapes.add_shape(1, Inches(0), Inches(6.8), Inches(13.333), Inches(0.2))
@@ -281,7 +342,15 @@ def make_pptx(cid, msg):
     tf0 = s0.shapes.add_textbox(Inches(1), Inches(2.2), Inches(11.333), Inches(2)).text_frame; tf0.word_wrap = True
     _add_p(tf0, title, 40, GOLD, bold=True, first=True)
     _add_p(tf0, data.get("subtitle", ""), 20, WHITE, sp=14)
-    _add_p(tf0, f"تاريخ الإصدار: {today_dates()} | Albaraa AI OS", 14, RGBColor(148, 163, 184), sp=28)
+    _add_p(tf0, f"تاريخ الإصدار: {today_dates()}", 14, RGBColor(148, 163, 184), sp=28)
+
+    slide_img = _fetch_visual(title, "/tmp/ppt_cover.jpg")
+    if slide_img and os.path.exists(slide_img):
+        try:
+            s0.shapes.add_picture(slide_img, Inches(0.8), Inches(4.5), width=Inches(3.2))
+        except Exception:
+            pass
+
     for idx, sl in enumerate(data.get("slides", [])[:8], 1):
         slide = prs.slides.add_slide(blank)
         slide.background.fill.solid(); slide.background.fill.fore_color.rgb = LIGHT_BG
@@ -302,11 +371,43 @@ def make_pptx(cid, msg):
         ftf = slide.shapes.add_textbox(Inches(0.8), Inches(6.9), Inches(11.7), Inches(0.4)).text_frame
         _add_p(ftf, f"{title}  |  شريحة {idx}", 11, SLATE, align=PP_ALIGN.LEFT, first=True)
 
-    path = "/tmp/Presentation.pptx"; prs.save(path)
-    send_file(cid, path, "Executive_Presentation.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", f"📽️ تم تصميم العرض التقديمي الاحترافي: *{title}*")
+    if slide_img and os.path.exists(slide_img):
+        os.remove(slide_img)
+
+    safe_fname = re.sub(r'[^\w\s-]', '', title).strip().replace(" ", "_") or "Presentation"
+    path = f"/tmp/{safe_fname}.pptx"; prs.save(path)
+    send_file(cid, path, f"{safe_fname}.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", f"📽️ تم تصميم العرض التقديمي: *{title}*")
     BUS.publish("office.pptx_exported", {"cid": cid, "title": title})
     if os.path.exists(path): os.remove(path)
     del prs; gc.collect()
+
+def make_live_powerbi(cid, msg):
+    import json
+    from core.core_ai import ai_ask_json
+    send_msg(cid, "📊 جاري بناء لوحة القيادة التفاعلية الحية وتجهيز رابط التعديل المباشر...")
+    title = _clean_title(msg)
+    prompt = (
+        f"أنشئ بيانات لوحة قيادة احترافية حول: {msg}\n"
+        'أرجع JSON فقط بهذا الهيكل الدقيق:\n'
+        '{"title": "عنوان اللوحة", "cols": ["البند", "القسم", "المحقق", "المستهدف", "الحالة"], "rows": [["بند 1", "قسم 1", "95", "100", "ممتاز"], ["بند 2", "قسم 2", "88", "90", "جيد"]]}'
+    )
+    board = ai_ask_json(prompt, "أنت محلل بيانات محترف. أنشئ 6 صفوف بيانات واقعية وأرقام دقيقة.", mode="fast")
+    if not isinstance(board, dict) or not board.get("rows"):
+        board = {
+            "title": title,
+            "cols": ["البند", "القسم", "المحقق", "المستهدف", "الحالة"],
+            "rows": [
+                ["مؤشر الإنجاز العام", "العمليات", "94", "95", "ممتاز"],
+                ["جودة المخرجات", "الجودة", "98", "95", "متفوق"],
+                ["سرعة الاستجابة", "التقنية", "91", "90", "ممتاز"]
+            ]
+        }
+    saved = sb("POST", "self_learning_logs", {"user_role": "live_board", "lesson_learned": json.dumps(board, ensure_ascii=False), "is_active": True})
+    bid = saved[0].get("id", 1) if isinstance(saved, list) and saved else 1
+    base_url = os.environ.get("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
+    board_link = f"{base_url}/board/{bid}" if base_url else f"/board/{bid}"
+    send_msg(cid, f"📊 *تم إطلاق لوحة القيادة الحية بنجاح:*\n*{board.get('title', title)}*\n\n🔗 *رابط اللوحة التفاعلية للتعديل المباشر:*\n{board_link}")
+    BUS.publish("office.live_board_created", {"cid": cid, "board_id": bid})
 
 def make_powerbi_kit(cid, msg):
     from docx import Document
@@ -314,7 +415,8 @@ def make_powerbi_kit(cid, msg):
     from docx.oxml import parse_xml
     from docx.oxml.ns import nsdecls
 
-    send_msg(cid, "📊 *وكيل نمذجة البيانات وPower BI:* جاري هندسة نموذج البيانات ومعادلات DAX الاحترافية...")
+    font_name = _detect_font(msg)
+    send_msg(cid, "📈 جاري إعداد نموذج البيانات ومعادلات DAX الاحترافية...")
     title = _clean_title(msg)
     prompt = (
         f"أنت خبير Power BI ومهندس ذكاء أعمال (BI Architect). للمشروع التالي: {msg}\n"
@@ -326,7 +428,9 @@ def make_powerbi_kit(cid, msg):
     guide = ai_ask(msg, prompt, temperature=0.2, mode="arabic")
 
     doc = Document()
-    doc.styles['Normal'].font.name = 'Arial'
+    doc.core_properties.author = ""
+    doc.core_properties.last_modified_by = ""
+    doc.styles['Normal'].font.name = font_name
     doc.styles['Normal'].font.size = DocPt(13)
 
     tbl = doc.add_table(rows=1, cols=1)
@@ -335,9 +439,9 @@ def make_powerbi_kit(cid, msg):
     p0 = cell.paragraphs[0]
     _set_rtl(p0)
     r0 = p0.add_run(f"دليل هندسة Power BI: {title}\n")
-    r0.font.name = 'Arial'; r0.font.size = DocPt(18); r0.font.bold = True; r0.font.color.rgb = RGBColor(255, 209, 102)
-    r1 = p0.add_run(f"تاريخ الإصدار: {today_dates()}  |  Albaraa AI OS")
-    r1.font.name = 'Arial'; r1.font.size = DocPt(11); r1.font.color.rgb = RGBColor(255, 255, 255)
+    r0.font.name = font_name; r0.font.size = DocPt(18); r0.font.bold = True; r0.font.color.rgb = RGBColor(255, 209, 102)
+    r1 = p0.add_run(f"تاريخ الإصدار: {today_dates()}")
+    r1.font.name = font_name; r1.font.size = DocPt(11); r1.font.color.rgb = RGBColor(255, 255, 255)
 
     for line in guide.split("\n"):
         cl = line.strip().replace("**", "")
@@ -345,14 +449,15 @@ def make_powerbi_kit(cid, msg):
         p = doc.add_paragraph()
         _set_rtl(p)
         run = p.add_run(cl.lstrip("# "))
-        run.font.name = 'Arial'
+        run.font.name = font_name
         if cl.startswith(("#", "1.", "2.", "3.")):
             run.font.size = DocPt(15); run.font.bold = True; run.font.color.rgb = RGBColor(11, 25, 44)
         else:
             run.font.size = DocPt(12.5); run.font.color.rgb = RGBColor(30, 41, 59)
 
-    path = "/tmp/PowerBI_Architecture.docx"; doc.save(path)
-    send_file(cid, path, "PowerBI_Architecture.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", f"📈 تم إعداد حزمة هندسة Power BI ومعادلات DAX: *{title}*")
+    safe_fname = re.sub(r'[^\w\s-]', '', title).strip().replace(" ", "_") or "PowerBI_Guide"
+    path = f"/tmp/{safe_fname}.docx"; doc.save(path)
+    send_file(cid, path, f"{safe_fname}.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", f"📈 تم إعداد حزمة هندسة Power BI ومعادلات DAX: *{title}*")
     BUS.publish("office.powerbi_exported", {"cid": cid, "title": title})
     if os.path.exists(path): os.remove(path)
     del doc; gc.collect()

@@ -1,14 +1,15 @@
-import os, json, io, re, requests
+import os, json, io, re, base64, requests
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, jsonify, send_file
 from openpyxl import Workbook
 from core.core_ai import sb, ai_ask, ai_ask_json, send_msg
 from core.orchestrator import run_task
-from core.auto_scheduler import start_scheduler
-from security.safe_guard import safe_run
+from core.auto_scheduler import start_scheduler, propose_safe_upgrade, get_proposal_code, approve_and_deploy_upgrade, rollback_upgrade
+from security.safe_guard import safe_run, inspect_prompt_injection, apply_saudi_governance
 from security.iam_gateway import IAM_GATEWAY
 from security.audit_ledger import AUDIT_LEDGER
 from multimodal.office_tools import make_word, make_excel, make_pptx, make_powerbi_kit, make_live_powerbi, make_kpi
+from multimodal.pro_capabilities import run_pro_capability, make_pdf_report
 from multimodal.media_maker import make_voice_note
 from multimodal.media_reader import transcribe_voice_note, read_media_from_url
 from channels.robotics_bridge import ROBOTICS_BRIDGE
@@ -43,7 +44,7 @@ def live_board(bid):
     if not res:
         return "<h2 dir='rtl'>⚠️ اللوحة غير موجودة</h2>", 404
 
-    record = res[0] if isinstance(res, list) else res
+    record = res if isinstance(res, list) else res
     board = json.loads(record["lesson_learned"])
     cols = board.get("cols", ["البند", "القسم", "المحقق", "المستهدف", "الحالة"])
     rows = board.get("rows", [])
@@ -82,11 +83,10 @@ def live_board(bid):
                     ai_reply = f"✅ {ai_data.get('reply', 'تم تحديث البيانات بنجاح.')}"
                 else:
                     ai_reply = "⚠️ تعذر معالجة التعديل حالياً، يرجى المحاولة مرة أخرى."
-
         board["cols"], board["rows"] = cols, rows
         sb("PATCH", "self_learning_logs", {"lesson_learned": json.dumps(board, ensure_ascii=False)}, q=f"?id=eq.{bid}")
 
-    labels = [str(r[0]) if isinstance(r, list) and r else str(r) for r in rows[:12] if r]
+    labels = [str(r) if isinstance(r, list) and r else str(r) for r in rows[:12] if r]
     values = []
     for r in rows[:12]:
         num = 0
@@ -98,7 +98,7 @@ def live_board(bid):
                     break
             except ValueError:
                 continue
-    values.append(num)
+        values.append(num)
     avg_val = round(sum(values) / len(values), 1) if values else 0
     max_val = max(values) if values else 0
     add_inputs = "".join([f"<div class='flex-1 min-w-[140px]'><label class='text-xs text-slate-400 block mb-1'>{c}</label><input name='c{i}' class='w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white' required></div>" for i, c in enumerate(cols)])
@@ -168,13 +168,12 @@ def live_board(bid):
       </script>
     </body></html>"""
     return html
-
 @app.route("/board/<int:bid>/export")
 def export_board(bid):
     res = sb("GET", "self_learning_logs", q=f"?id=eq.{bid}")
     if not res:
         return "Not Found", 404
-    record = res if isinstance(res, list) else res
+    record = res[0] if isinstance(res, list) else res
     board = json.loads(record["lesson_learned"])
     wb = Workbook(); ws = wb.active; ws.sheet_view.rightToLeft = True
     ws.append(board.get("cols", []))
@@ -182,12 +181,13 @@ def export_board(bid):
     buf = io.BytesIO(); wb.save(buf); buf.seek(0)
     return send_file(buf, as_attachment=True, download_name=f"Dashboard_{bid}.xlsx")
 
+
 @app.route("/site/<int:sid>", methods=["GET", "POST"])
 def live_site(sid):
     res = sb("GET", "self_learning_logs", q=f"?id=eq.{sid}")
     if not res:
         return "<h2 dir='rtl'>⚠️ الصفحة غير موجودة</h2>", 404
-    record = res if isinstance(res, list) else res
+    record = res[0] if isinstance(res, list) else res
     html_code = record.get("lesson_learned", "")
     if request.method == "POST":
         edit_req = request.form.get("edit_req", "").strip()
@@ -200,7 +200,7 @@ def live_site(sid):
             )
             clean_html = updated.replace("```html", "").replace("```", "").strip()
             if "<html" in clean_html.lower() or "<body" in clean_html.lower() or "<div" in clean_html.lower():
-                html_code = clean_html
+                html_code = apply_saudi_governance("موقع", clean_html)
                 sb("PATCH", "self_learning_logs", {"lesson_learned": html_code}, q=f"?id=eq.{sid}")
     edit_bar = """
     <div id='live-editor-bar' dir='rtl' style='position:fixed;bottom:12px;left:12px;right:12px;z-index:99999;background:rgba(15,23,42,0.95);border:1px solid #334155;padding:10px 14px;border-radius:14px;display:flex;gap:8px;align-items:center;box-shadow:0 10px 25px rgba(0,0,0,0.4);font-family:sans-serif;'>
@@ -213,17 +213,47 @@ def live_site(sid):
     """
     return f"{html_code}\n{edit_bar}"
 
+
+@app.route("/timeline", methods=["GET"])
+def performance_timeline():
+    kpis = sb("GET", "telemetry_kpis", q="?order=id.desc&limit=30") or []
+    logs = sb("GET", "self_learning_logs", q="?order=id.desc&limit=20") or []
+    rows_html = "".join([
+        f"<tr class='border-b border-slate-800'><td class='p-3'>{k.get('user_role','-')}</td><td class='p-3'>{k.get('unit_used','-')}</td><td class='p-3 text-emerald-400'>{k.get('response_time_sec',0)} ث</td><td class='p-3 text-sky-400'>{k.get('user_growth_score',95)}%</td></tr>"
+        for k in kpis if isinstance(k, dict)
+    ])
+    notes_html = "".join([
+        f"<li class='p-2 bg-slate-950/60 rounded-lg border border-slate-800 text-xs text-slate-300'>{str(l.get('lesson_learned',''))[:140]}</li>"
+        for l in logs if isinstance(l, dict) and l.get('user_role') not in ('live_board', 'live_site')
+    ])
+    return f"""<!DOCTYPE html><html dir='rtl' lang='ar'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
+    <title>المسار الزمني لتطور الأداء</title><script src='{_TW_CDN}'></script><link href='{_GF_CDN}' rel='stylesheet'>
+    <style>body{{font-family:'Cairo',sans-serif;background:#0b1120;color:#f8fafc;}}</style></head>
+    <body class='p-6 max-w-6xl mx-auto'>
+      <h1 class='text-2xl font-bold text-amber-400 mb-6'>📈 المسار الزمني لقياس الجودة وتطور أداء المستخدمين</h1>
+      <div class='grid grid-cols-1 lg:grid-cols-3 gap-6'>
+        <div class='lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden'>
+          <table class='w-full text-right'><thead class='bg-slate-950 text-slate-400 text-xs'><tr><th class='p-3'>المستخدم</th><th class='p-3'>المهمة</th><th class='p-3'>سرعة الإنجاز</th><th class='p-3'>مؤشر الجودة</th></tr></thead><tbody>{rows_html}</tbody></table>
+        </div>
+        <div class='bg-slate-900 border border-slate-800 rounded-2xl p-4'><h3 class='font-bold text-sky-400 mb-3'>🧠 سجل التعلم والتفضيلات</h3><ul class='space-y-2'>{notes_html}</ul></div>
+      </div>
+    </body></html>"""
+
+
 @app.route("/health", methods=["GET"])
 def health_check():
     return jsonify({"status": "healthy", "audit_chain": AUDIT_LEDGER.verify_integrity()}), 200
+
 
 @app.route("/api/telemetry", methods=["GET"])
 def api_telemetry():
     return jsonify({"telemetry": MONITOR.snapshot(), "fleet": ROBOTICS_BRIDGE.fleet_status()}), 200
 
+
 @app.route("/api/benchmark", methods=["GET"])
 def api_benchmark():
     return jsonify(run_benchmark_suite()), 200
+
 
 @app.route("/api/chat", methods=["POST"])
 def api_web_chat():
@@ -235,6 +265,7 @@ def api_web_chat():
     reply = run_task(f"web_{uid}", msg, "trainee", uid)
     return jsonify({"reply": reply}), 200
 
+
 @app.route("/api/robotics", methods=["POST"])
 def api_robotics():
     body = request.get_json(silent=True) or {}
@@ -242,23 +273,28 @@ def api_robotics():
     if "command" in body:
         return jsonify(ROBOTICS_BRIDGE.dispatch_command("api_operator", dev, body["command"], body.get("params"))), 200
     return jsonify(ROBOTICS_BRIDGE.register_telemetry(dev, body)), 200
+
+
 @app.route("/", methods=["GET"])
 def home():
     return "System Online", 200
-
 HELP_MENU = (
-    "📌 *الخدمات والقدرات المتاحة:*\n\n"
-    "1️⃣ *تقارير وبحوث Word احترافية:* اكتب (تقرير وورد عن... أو بحث علمي عن...)\n"
-    "2️⃣ *لوحات قيادة Excel + رسوم بيانية:* اكتب (لوحة إكسل لـ...)\n"
-    "3️⃣ *عروض تقديمية PowerPoint بالصور:* اكتب (عرض بوربوينت عن...)\n"
-    "4️⃣ *لوحات Power BI حية للتعديل المباشر:* اكتب (لوحة باور بي اي حية لـ...)\n"
-    "5️⃣ *حزمة هندسة Power BI + DAX:* اكتب (دليل باور بي اي لـ...)\n"
+    "📌 *الخدمات والقدرات المتكاملة (58 قدرة تنفيذية وحاكمة):*\n\n"
+    "1️⃣ *مستندات Word وبحوث أكاديمية:* اكتب (تقرير وورد عن... أو بحث علمي عن...)\n"
+    "2️⃣ *تصدير PDF رسمي:* اكتب (تقرير pdf عن...)\n"
+    "3️⃣ *لوحات قيادة Excel + رسوم بيانية:* اكتب (لوحة إكسل لـ...)\n"
+    "4️⃣ *عروض تقديمية PowerPoint بالصور:* اكتب (عرض بوربوينت عن...)\n"
+    "5️⃣ *لوحات Power BI حية + DAX:* اكتب (لوحة باور بي اي حية لـ... أو دليل باور بي اي لـ...)\n"
     "6️⃣ *تصميم مواقع حية ورفعها على GitHub:* اكتب (صمم موقع لـ... أو ارفع على قيت هب...)\n"
-    "7️⃣ *بصمة صوتية:* اكتب (اقرأ بصوت: النص المطلوب)\n"
-    "8️⃣ *تقرير قياس الأداء والتطور:* اكتب (تقرير الأداء)\n\n"
-    "✨ *التخصيص والتعديل الفوري:*\n"
+    "7️⃣ *التجارة الإلكترونية (سلة/زد) والتسويق:* اكتب (خطة متجر أو وصف منتج أو حملة إعلانية لـ...)\n"
+    "8️⃣ *الموارد البشرية والتوظيف:* اكتب (وصف وظيفي أو فرز سير ذاتية أو حقيبة تدريبية لـ...)\n"
+    "9️⃣ *الهندسة والعقارات والمالية (ZATCA):* اكتب (جدوى عقارية أو حساب كميات أو عرض سعر ضريبي لـ...)\n"
+    "🔟 *العقود والقانون السعودي والحوكمة:* اكتب (صياغة عقد أو خطاب رسمي أو محضر اجتماع لـ...)\n"
+    "1️⃣1️⃣ *الصوتيات والتقارير الزمنية:* اكتب (اقرأ بصوت: النص) أو (تقرير الأداء)\n\n"
+    "✨ *التخصيص والتطوير الآمن:*\n"
     "• لحفظ قاعدة دائمة لأسلوبك: ابدأ رسالتك بـ *(قاعدة: ...)* أو *(ملاحظة: ...)*\n"
-    "• لتعديل آخر مخرج وإعادة إنتاجه فوراً: اكتب *(تعديل: ملاحظتك هنا)*"
+    "• لتعديل آخر مخرج فوراً: اكتب *(تعديل: ملاحظتك هنا)*\n"
+    "• لفحص وتطوير النظام: اكتب *(اقترح تطوير)*"
 )
 
 
@@ -289,6 +325,7 @@ def _run_with_tip(fn, cid, task):
 def _dispatch_smart(cid: str, txt: str, sname: str):
     clean = txt.strip()
     user_tag = sname.strip() if sname and sname.strip() != "User" else "admin"
+    is_admin_user = (ADMIN_PHONE and ADMIN_PHONE in "".join(filter(str.isdigit, cid)))
 
     if any(k in clean for k in ("القائمة", "المساعدة", "الخدمات", "/help", "قدراتك", "ايش تقدر تسوي", "وش تقدر تسوي")):
         send_msg(cid, HELP_MENU)
@@ -297,6 +334,35 @@ def _dispatch_smart(cid: str, txt: str, sname: str):
     if clean in ("تقرير الأداء", "قياس الأداء", "kpi"):
         safe_run(make_kpi, cid)
         return
+
+    # أوامر إدارة التطور الذاتي الآمن (للمدير فقط)
+    if is_admin_user:
+        if clean.startswith("اقترح تطوير"):
+            topic = clean.replace("اقترح تطوير", "").strip() or "تحسين الأداء وإضافة ميزة جديدة"
+            send_msg(cid, "🔬 جاري البحث وتحليل السجلات لاقتراح تطوير برمجي آمن ومفحوص...")
+            EXECUTOR.submit(safe_run, propose_safe_upgrade, topic)
+            return
+        if clean.startswith("عرض كود "):
+            pid_str = "".join(filter(str.isdigit, clean))
+            if pid_str:
+                send_msg(cid, get_proposal_code(int(pid_str)))
+            return
+        if clean.startswith("اعتماد التطوير "):
+            pid_str = "".join(filter(str.isdigit, clean))
+            if pid_str:
+                send_msg(cid, approve_and_deploy_upgrade(int(pid_str)))
+            return
+        if clean.startswith("تراجع عن التطوير "):
+            pid_str = "".join(filter(str.isdigit, clean))
+            if pid_str:
+                send_msg(cid, rollback_upgrade(int(pid_str)))
+            return
+        if clean.startswith("رفض التطوير "):
+            pid_str = "".join(filter(str.isdigit, clean))
+            if pid_str:
+                sb("PATCH", "self_learning_logs", {"is_active": False}, q=f"?id=eq.{pid_str}")
+                send_msg(cid, f"❌ تم رفض وحذف مقترح التطوير رقم `{pid_str}`.")
+            return
 
     for prefix in ("تعديل:", "ملاحظة:", "قاعدة:", "تغذية راجعة:"):
         if clean.startswith(prefix):
@@ -317,36 +383,40 @@ def _dispatch_smart(cid: str, txt: str, sname: str):
     LAST_TASK[cid] = clean
 
     sub_tasks = [t.strip() for t in clean.splitlines() if len(t.strip()) > 3 and not t.strip().startswith("[تعديل")]
-    if len(sub_tasks) == 1 and (" و" in clean) and sum(w in clean for w in ("وورد", "اكسل", "إكسل", "بوربوينت", "باور بي", "موقع")) >= 2:
+    if len(sub_tasks) == 1 and (" و" in clean) and sum(w in clean for w in ("وورد", "اكسل", "إكسل", "بوربوينت", "باور بي", "موقع", "pdf")) >= 2:
         topic = clean.split("عن ", 1)[-1] if "عن " in clean else clean
         sub_tasks = []
         if "وورد" in clean: sub_tasks.append(f"تقرير وورد عن {topic}")
+        if "pdf" in clean.lower(): sub_tasks.append(f"تقرير pdf عن {topic}")
         if any(k in clean for k in ("اكسل", "إكسل")): sub_tasks.append(f"لوحة إكسل عن {topic}")
         if "بوربوينت" in clean: sub_tasks.append(f"عرض بوربوينت عن {topic}")
         if "باور بي" in clean: sub_tasks.append(f"لوحة باور بي اي حية عن {topic}")
         if "موقع" in clean: sub_tasks.append(f"صمم موقع عن {topic}")
+
     for task in (sub_tasks or [clean])[:4]:
         low = task.lower()
         if any(k in low for k in ("لوحة باور بي", "باور بي اي حية", "باور بي أي حية", "live power bi", "لوحة حية")):
             EXECUTOR.submit(safe_run, make_live_powerbi, cid, task)
         elif any(k in low for k in ("دليل باور بي", "هندسة باور بي", "dax")):
             EXECUTOR.submit(safe_run, _run_with_tip, make_powerbi_kit, cid, task)
+        elif any(k in low for k in ("pdf", "بي دي اف")):
+            EXECUTOR.submit(safe_run, _run_with_tip, make_pdf_report, cid, task)
         elif any(k in low for k in ("تقرير وورد", "ملف وورد", "word", "بحث علمي", "بحث أكاديمي", "بحث اكاديمي", "دراسة علمية")) and not any(k in low for k in ("باور بي", "power bi")):
             EXECUTOR.submit(safe_run, _run_with_tip, make_word, cid, task)
         elif any(k in low for k in ("لوحة اكسل", "لوحة إكسل", "ملف اكسل", "ملف إكسل", "excel")):
             EXECUTOR.submit(safe_run, _run_with_tip, make_excel, cid, task)
         elif any(k in low for k in ("بوربوينت", "عرض تقديمي", "شرائح", "pptx", "powerpoint")):
             EXECUTOR.submit(safe_run, _run_with_tip, make_pptx, cid, task)
-        elif any(k in low for k in ("صمم موقع", "انشئ موقع", "أنشئ موقع", "موقع الكتروني", "موقع إلكتروني", "صفحة هبوط", "موقع ويب")):
+        elif any(k in low for k in ("صمم موقع", "انشئ موقع", "أنشئ موقع", "موقع الكتروني", "موقع إلكتروني", "صفحة هبوط", "موقع ويب", "استبيان")):
             EXECUTOR.submit(safe_run, _build_live_site, cid, task)
         elif any(k in low for k in ("ارفع على قيت", "ارفع على جيت", "github", "قيت هب", "مستودع")):
             EXECUTOR.submit(safe_run, _push_to_github, cid, task)
+        elif any(k in low for k in ("سلة", "زد", "متجر", "منتج", "سلة متروكة", "تسعير", "سيرة ذاتية", "توظيف", "مقابلة", "وصف وظيفي", "حقيبة تدريبية", "كميات", "مقاولات", "عقار", "جدوى عقارية", "مناقصة", "عقد", "اتفاقية", "لائحة", "محضر اجتماع", "خطاب رسمي", "فاتورة", "عرض سعر", "ضريبة", "حملة إعلانية", "سيناريو")):
+            EXECUTOR.submit(safe_run, _run_with_tip, run_pro_capability, cid, task)
         elif any(k in low for k in ("اقرأ بصوت", "بصمة صوتية")):
             EXECUTOR.submit(safe_run, make_voice_note, cid, task)
         else:
             EXECUTOR.submit(safe_run, run_task, cid, task, user_tag, sname)
-
-
 def _build_live_site(cid: str, task: str):
     send_msg(cid, "🌐 جاري تصميم وبرمجة الموقع وتجهيز رابط المعاينة والتعديل المباشر...")
     prompt = (
@@ -360,8 +430,9 @@ def _build_live_site(cid: str, task: str):
     if "<html" not in clean_html.lower():
         clean_html = f"<!DOCTYPE html><html dir='rtl' lang='ar'><head><meta charset='utf-8'><title>{task[:40]}</title><script src='{_TW_CDN}'></script></head><body class='bg-slate-950 text-white p-8 font-sans'>{clean_html}</body></html>"
 
+    clean_html = apply_saudi_governance(task, clean_html)
     saved = sb("POST", "self_learning_logs", {"user_role": "live_site", "lesson_learned": clean_html, "is_active": True})
-    sid = saved[0].get("id", 1) if isinstance(saved, list) and saved else 1
+    sid = saved.get("id", 1) if isinstance(saved, list) and saved else 1
     base_url = os.environ.get("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
     site_link = f"{base_url}/site/{sid}" if base_url else f"/site/{sid}"
     send_msg(cid, f"🌐 *تم تصميم وإطلاق الموقع بنجاح!*\n\n🔗 *رابط الموقع المباشر (مع أداة التعديل الفوري أسفل الصفحة):*\n{site_link}\n\n💡 يمكنك أيضاً كتابة `تعديل: [وصف التعديل]` هنا في المحادثة لإعادة بنائه.")
@@ -373,7 +444,7 @@ def _push_to_github(cid: str, task: str):
         send_msg(cid, "⚠️ للرفع التلقائي على GitHub، أضف متغير `GITHUB_TOKEN` في إعدادات Render أولاً، أو اطلب الكود وسأجهزه لك مباشرة.")
         return
     send_msg(cid, "📦 جاري تجهيز الملفات البرمجية ورفعها إلى حسابك في GitHub...")
-    repo_name = f"project-{int(os.times()[4])}"
+    repo_name = f"project-{int(os.times())}"
     headers = {"Authorization": f"token {gh_token}", "Accept": "application/vnd.github.v3+json"}
     r_repo = requests.post("https://github.com", headers=headers, json={"name": repo_name, "private": False, "auto_init": True}, timeout=15)
     if r_repo.status_code not in (200, 201):
@@ -383,7 +454,6 @@ def _push_to_github(cid: str, task: str):
     full_name = repo_info.get("full_name", "")
     html_url = repo_info.get("html_url", "")
     code_content = ai_ask(task, "اكتب الكود البرمجي الكامل والاحترافي لهذا المشروع بدون مقدمات أو شرح:", mode="general", use_cache=False)
-    import base64
     b64_code = base64.b64encode(code_content.encode("utf-8")).decode("utf-8")
     requests.put(f"https://github.com{full_name}/contents/index.html", headers=headers, json={"message": "Initial commit", "content": b64_code}, timeout=15)
     send_msg(cid, f"✅ *تم إنشاء المستودع ورفع المشروع على GitHub بنجاح:*\n{html_url}")
@@ -396,6 +466,11 @@ def _handle_media_message(cid: str, mdata: dict, sname: str):
     caption = file_data.get("caption", "").strip()
     if not dl_url:
         return
+    if caption:
+        sec_check = inspect_prompt_injection(caption, cid)
+        if not sec_check.get("is_safe"):
+            send_msg(cid, "🛡️ تم حظر الطلب لمخالفته ضوابط الحماية والحوكمة.")
+            return
     if mime.startswith("audio/"):
         transcript = transcribe_voice_note(dl_url)
         if transcript:
@@ -405,7 +480,10 @@ def _handle_media_message(cid: str, mdata: dict, sname: str):
             send_msg(cid, "⚠️ تعذر فهم الرسالة الصوتية، يرجى إعادة الإرسال.")
     else:
         analysis = read_media_from_url(dl_url, mime, caption)
-        send_msg(cid, analysis)
+        if caption and any(k in caption.lower() for k in ("وورد", "اكسل", "إكسل", "بوربوينت", "باور بي", "pdf", "تقرير", "لوحة", "لخص")):
+            _dispatch_smart(cid, f"{caption}\n\nالبيانات المستخرجة من المرفق:\n{analysis}", sname)
+        else:
+            send_msg(cid, analysis)
 
 
 @app.route("/whatsapp-webhook", methods=["POST"])
@@ -440,8 +518,14 @@ def webhook():
         or ""
     ).strip()
 
-    bot_prefixes = ("🔍", "⚙️", "🛡️", "📑", "🌐", "🚀", "💻", "⚠", "✅", "🤖", "📊", "📄", "📽️", "👥", "💡", "🧠", "🎙", "📚", "🔄", "📌", "📦")
+    bot_prefixes = ("🔍", "⚙️", "🛡️", "📑", "🌐", "🚀", "💻", "⚠", "✅", "🤖", "📊", "📄", "📽️", "👥", "💡", "🧠", "🎙", "📚", "🔄", "📌", "📦", "🛍️", "🏗️", "⚖️", "🧾", "🔬", "❌", "↩️")
     if txt and cid and not any(txt.startswith(p) for p in bot_prefixes):
+        sec_check = inspect_prompt_injection(txt, cid)
+        if not sec_check.get("is_safe"):
+            print(f"SECURITY BLOCK [{sec_check.get('matched_rule')}]: {cid}", flush=True)
+            send_msg(cid, "🛡️ تم حظر هذا الطلب لمخالفته ضوابط الأمن السيبراني والحوكمة.")
+            return jsonify({"status": "security_blocked"}), 200
+
         print(f"IN: {wtype} | CID: {cid} | MSG: {txt[:25]}", flush=True)
         EXECUTOR.submit(_dispatch_smart, cid, txt, sname)
 

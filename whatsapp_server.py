@@ -2,10 +2,18 @@ import os, json, io
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, jsonify, send_file
 from openpyxl import Workbook
-from core_ai import sb, ai_ask_json, send_msg
-from agent_brain import run_task
-from safe_guard import safe_run
-from office_tools import make_word, make_excel, make_pptx, make_powerbi_kit, make_kpi
+from core.core_ai import sb, ai_ask_json, send_msg
+from core.orchestrator import run_task
+from core.auto_scheduler import start_scheduler
+from security.safe_guard import safe_run
+from security.iam_gateway import IAM_GATEWAY
+from security.audit_ledger import AUDIT_LEDGER
+from multimodal.office_tools import make_word, make_excel, make_pptx, make_powerbi_kit, make_kpi
+from multimodal.media_maker import make_voice_note
+from multimodal.media_reader import transcribe_voice_note, read_media_from_url
+from channels.robotics_bridge import ROBOTICS_BRIDGE
+from telemetry.realtime_monitor import MONITOR
+from telemetry.benchmark_lab import run_benchmark_suite
 
 app = Flask(__name__)
 EXECUTOR = ThreadPoolExecutor(max_workers=6)
@@ -19,6 +27,8 @@ ALLOWED_GROUP = os.environ.get("ALLOWED_GROUP", "").strip()
 _TW_CDN = "".join(["https:/", "/cdn.tailwindcss.", "com"])
 _CH_CDN = "".join(["https:/", "/cdn.jsdelivr.", "net/npm/chart.js"])
 _GF_CDN = "".join(["https:/", "/fonts.googleapis.", "com/css2?family=Cairo:wght@400;600;700&display=swap"])
+
+start_scheduler()
 
 def _mark_seen(mid: str) -> bool:
     if not mid: return False
@@ -90,7 +100,6 @@ def live_board(bid):
         values.append(num)
     avg_val = round(sum(values) / len(values), 1) if values else 0
     max_val = max(values) if values else 0
-
     add_inputs = "".join([f"<div class='flex-1 min-w-[140px]'><label class='text-xs text-slate-400 block mb-1'>{c}</label><input name='c{i}' class='w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white' required></div>" for i, c in enumerate(cols)])
     rows_html = ""
     for r_i, r in enumerate(rows):
@@ -165,43 +174,65 @@ def export_board(bid):
     buf = io.BytesIO(); wb.save(buf); buf.seek(0)
     return send_file(buf, as_attachment=True, download_name=f"PowerBI_Board_{bid}.xlsx")
 
+@app.route("/health", methods=["GET"])
+def health_check():
+    return jsonify({"status": "healthy", "system": "Albaraa-AI-OS", "audit_chain": AUDIT_LEDGER.verify_integrity()}), 200
+
+@app.route("/api/telemetry", methods=["GET"])
+def api_telemetry():
+    return jsonify({"telemetry": MONITOR.snapshot(), "fleet": ROBOTICS_BRIDGE.fleet_status()}), 200
+
+@app.route("/api/benchmark", methods=["GET"])
+def api_benchmark():
+    return jsonify(run_benchmark_suite()), 200
+
+@app.route("/api/chat", methods=["POST"])
+def api_web_chat():
+    body = request.get_json(silent=True) or {}
+    msg = str(body.get("message", "")).strip()
+    uid = str(body.get("user_id", "web_guest")).strip()
+    if not msg:
+        return jsonify({"error": "empty_message"}), 400
+    reply = run_task(f"web_{uid}", msg, "trainee", uid)
+    return jsonify({"reply": reply}), 200
+
+@app.route("/api/robotics", methods=["POST"])
+def api_robotics():
+    body = request.get_json(silent=True) or {}
+    dev = str(body.get("device_id", "unit_01"))
+    if "command" in body:
+        return jsonify(ROBOTICS_BRIDGE.dispatch_command("api_operator", dev, body["command"], body.get("params"))), 200
+    return jsonify(ROBOTICS_BRIDGE.register_telemetry(dev, body)), 200
+
 @app.route("/", methods=["GET"])
 def home():
-    return "Albaraa AI OS Active", 200
-
+    return "Albaraa AI OS Active (25 Modules Online)", 200
 HELP_MENU = (
-    "🤖 *منظومة Albaraa AI OS التنفيذية*\n\n"
+    "🤖 *منظومة Albaraa AI OS التنفيذية (25 وحدة متكاملة)*\n\n"
     "📌 *القدرات والأدوات المتاحة حالياً:*\n"
     "1️⃣ *تقارير Word احترافية:* اكتب (تقرير وورد عن...)\n"
     "2️⃣ *لوحات قيادة Excel + رسوم بيانية:* اكتب (لوحة إكسل لـ...)\n"
     "3️⃣ *عروض تقديمية PowerPoint:* اكتب (عرض بوربوينت عن...)\n"
     "4️⃣ *لوحات Power BI حية + DAX:* اكتب (لوحة باور بي اي حية لـ...)\n"
     "5️⃣ *حزمة هندسة Power BI:* اكتب (دليل باور بي اي لـ...)\n"
-    "6️⃣ *تنفيذ عدة مهام معاً:* اكتب طلباتك في سطور متعددة أو في جملة واحدة\n"
+    "6️⃣ *بصمة صوتية سعودية:* اكتب (اقرأ بصوت: النص المطلوب)\n"
     "7️⃣ *البحث والاستقصاء والبرمجة:* اكتب (ابحث عن... أو برمج لي...)\n"
     "8️⃣ *تقرير قياس أداء النظام:* اكتب (تقرير الأداء)\n\n"
     "🧠 *نظام التغذية الراجعة والتعلم الذاتي:*\n"
     "• لحفظ قاعدة دائمة للمستقبل: ابدأ رسالتك بـ *(قاعدة: ...)* أو *(ملاحظة: ...)*\n"
     "• لتعديل آخر مخرج وإعادة إنتاجه فوراً: اكتب *(تعديل: ملاحظتك هنا)*"
 )
+
+
 def _is_authorized(cid: str, sender: str) -> bool:
-    # 1. المحادثة الخاصة للمشرف (أنت فقط في الخاص)
-    if "@c.us" in cid:
-        cid_digits = "".join(filter(str.isdigit, cid))
-        return bool(ADMIN_PHONE and ADMIN_PHONE in cid_digits)
+    session = IAM_GATEWAY.resolve_session(cid, sender=sender)
+    return bool(session.get("authorized"))
 
-    # 2. القروب المشترك فقط (يقبل رسائلك ورسائل أحمد داخل القروب)
-    if "@g.us" in cid and ALLOWED_GROUP and ALLOWED_GROUP in cid:
-        sender_digits = "".join(filter(str.isdigit, sender))
-        if not sender_digits:
-            return True
-        return bool((ADMIN_PHONE and ADMIN_PHONE in sender_digits) or (AHMED_PHONE and AHMED_PHONE in sender_digits))
-
-    return False
 
 def _run_with_tip(fn, cid, task):
     fn(cid, task)
     send_msg(cid, "💡 *لتعديل هذا المخرج وإعادة إنتاجه فوراً وفق ملاحظتك، أرسل:*\n`تعديل: [اكتب التعديل المطلوب هنا]`")
+
 
 def _dispatch_smart(cid: str, txt: str, sname: str):
     clean = txt.strip()
@@ -213,7 +244,6 @@ def _dispatch_smart(cid: str, txt: str, sname: str):
         safe_run(make_kpi, cid)
         return
 
-    # تفعيل التغذية الراجعة والتصحيح الفوري
     for prefix in ("تعديل:", "ملاحظة:", "قاعدة:", "تغذية راجعة:"):
         if clean.startswith(prefix):
             note = clean[len(prefix):].strip()
@@ -232,7 +262,6 @@ def _dispatch_smart(cid: str, txt: str, sname: str):
 
     LAST_TASK[cid] = clean
 
-    # تقسيم الطلبات المتعددة في رسالة واحدة
     sub_tasks = [t.strip() for t in clean.splitlines() if len(t.strip()) > 3 and not t.strip().startswith("[تعديل")]
     if len(sub_tasks) == 1 and (" و" in clean) and sum(w in clean for w in ("وورد", "اكسل", "إكسل", "بوربوينت", "باور بي")) >= 2:
         topic = clean.split("عن ", 1)[-1] if "عن " in clean else clean
@@ -252,8 +281,30 @@ def _dispatch_smart(cid: str, txt: str, sname: str):
             EXECUTOR.submit(safe_run, _run_with_tip, make_pptx, cid, task)
         elif any(k in low for k in ("دليل باور بي", "هندسة باور بي", "dax")):
             EXECUTOR.submit(safe_run, _run_with_tip, make_powerbi_kit, cid, task)
+        elif any(k in low for k in ("اقرأ بصوت", "بصمة صوتية")):
+            EXECUTOR.submit(safe_run, make_voice_note, cid, task)
         else:
             EXECUTOR.submit(safe_run, run_task, cid, task, "admin", sname)
+
+
+def _handle_media_message(cid: str, mdata: dict, sname: str):
+    file_data = mdata.get("fileMessageData", {})
+    dl_url = file_data.get("downloadUrl", "")
+    mime = file_data.get("mimeType", "")
+    caption = file_data.get("caption", "").strip()
+    if not dl_url:
+        return
+    if mime.startswith("audio/"):
+        transcript = transcribe_voice_note(dl_url)
+        if transcript:
+            send_msg(cid, f"🎙 *تم تفريغ البصمة الصوتية:*\n«{transcript}»")
+            _dispatch_smart(cid, transcript, sname)
+        else:
+            send_msg(cid, "⚠️ تعذر فهم البصمة الصوتية، حاول الإرسال مرة أخرى.")
+    else:
+        analysis = read_media_from_url(dl_url, mime, caption)
+        send_msg(cid, analysis)
+
 
 @app.route("/whatsapp-webhook", methods=["POST"])
 def webhook():
@@ -270,12 +321,18 @@ def webhook():
     if not _is_authorized(cid, sender):
         return jsonify({"status": "unauthorized"}), 200
     mdata = data.get("messageData", {})
-    txt = (mdata.get("textMessageData", {}).get("textMessage") or mdata.get("extendedTextMessageData", {}).get("text") or "").strip()
     sname = sdata.get("senderName", "User")
-    if txt and cid and not any(txt.startswith(p) for p in ("🔍", "⚙️", "🛡️", "📑", "🌐", "🚀", "💻", "⚠", "✅", "🤖", "📊", "📄", "📽️", "👥", "💡", "🧠")):
+
+    if mdata.get("typeMessage") in ("audioMessage", "imageMessage", "documentMessage"):
+        EXECUTOR.submit(safe_run, _handle_media_message, cid, mdata, sname)
+        return jsonify({"status": "media_queued"}), 200
+
+    txt = (mdata.get("textMessageData", {}).get("textMessage") or mdata.get("extendedTextMessageData", {}).get("text") or "").strip()
+    if txt and cid and not any(txt.startswith(p) for p in ("🔍", "⚙️", "🛡️", "📑", "🌐", "🚀", "💻", "⚠", "✅", "🤖", "📊", "📄", "📽️", "👥", "💡", "🧠", "🎙")):
         print(f"IN: {wtype} | CID: {cid} | MSG: {txt[:25]}", flush=True)
         EXECUTOR.submit(_dispatch_smart, cid, txt, sname)
     return jsonify({"status": "ok"}), 200
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))

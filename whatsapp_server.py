@@ -1,119 +1,35 @@
-import os, json, io, re, time, base64, requests
-from concurrent.futures import ThreadPoolExecutor
-from flask import Flask, request, jsonify, send_file
-from openpyxl import Workbook
-from core.core_ai import sb, ai_ask, ai_ask_json, send_msg
-from core.orchestrator import run_task
-from core.auto_scheduler import start_scheduler, propose_safe_upgrade, get_proposal_code, approve_and_deploy_upgrade, rollback_upgrade
-from security.safe_guard import safe_run, inspect_prompt_injection, apply_saudi_governance
-from security.iam_gateway import IAM_GATEWAY
-from security.audit_ledger import AUDIT_LEDGER
-from multimodal.office_tools import make_word, make_excel, make_pptx, make_powerbi_kit, make_live_powerbi, make_kpi
-from multimodal.pro_capabilities import run_pro_capability, make_pdf_report
-from multimodal.media_maker import make_voice_note
-from multimodal.media_reader import transcribe_voice_note, read_media_from_url
-from channels.robotics_bridge import ROBOTICS_BRIDGE
-from telemetry.realtime_monitor import MONITOR
-from telemetry.benchmark_lab import run_benchmark_suite
-
-app = Flask(__name__)
-EXECUTOR = ThreadPoolExecutor(max_workers=6)
-SEEN = set()
-LAST_TASK = {}
-
-ADMIN_PHONE = "".join(filter(str.isdigit, os.environ.get("ADMIN_PHONE", "")))
-AHMED_PHONE = "".join(filter(str.isdigit, os.environ.get("AHMED_PHONE", "")))
-ALLOWED_GROUP = os.environ.get("ALLOWED_GROUP", "").strip()
-
-_TW_CDN = "".join(["https:/", "/cdn.tailwindcss.", "com"])
-_CH_CDN = "".join(["https:/", "/cdn.jsdelivr.", "net/npm/chart.js"])
-_GF_CDN = "".join(["https:/", "/fonts.googleapis.", "com/css2?family=Cairo:wght@400;600;700&display=swap"])
-
-start_scheduler()
-
-def _mark_seen(mid: str) -> bool:
-    if not mid: return False
-    if mid in SEEN: return True
-    if len(SEEN) > 500: SEEN.clear()
-    SEEN.add(mid)
-    return False
-
-@app.route("/board/<int:bid>", methods=["GET", "POST"])
-def live_board(bid):
-    res = sb("GET", "self_learning_logs", q=f"?id=eq.{bid}")
+@app.route("/site/<int:sid>", methods=["GET", "POST"])
+def live_site(sid):
+    res = sb("GET", "self_learning_logs", q=f"?id=eq.{sid}")
     if not res:
-        return "<h2 dir='rtl'>⚠️ اللوحة غير موجودة</h2>", 404
+        return "<h2 dir='rtl'>⚠️ الصفحة غير موجودة</h2>", 404
 
     record = res[0] if isinstance(res, list) else res
-    board = json.loads(record["lesson_learned"])
-    cols = board.get("cols", ["البند", "القسم", "المحقق", "المستهدف", "الحالة"])
-    rows = board.get("rows", [])
-    ai_reply = ""
+    html_code = record["lesson_learned"]
 
     if request.method == "POST":
-        act = request.form.get("action")
-        if act == "add":
-            rows.append([request.form.get(f"c{i}", "").strip() for i in range(len(cols))])
-            ai_reply = "✅ تمت إضافة السجل بنجاح."
-        elif act == "edit":
-            idx = int(request.form.get("idx", -1))
-            if 0 <= idx < len(rows):
-                rows[idx] = [request.form.get(f"e{i}", "").strip() for i in range(len(cols))]
-                ai_reply = "✅ تم حفظ التعديل."
-        elif act == "del":
-            idx = int(request.form.get("idx", -1))
-            if 0 <= idx < len(rows):
-                rows.pop(idx)
-                ai_reply = "🗑️ تم حذف السجل."
-        elif act == "chat":
-            q = request.form.get("q", "").strip()
-            if q:
-                prompt = (
-                    f"البيانات الحالية للوحة:\n{json.dumps(board, ensure_ascii=False)}\n\n"
-                    f"أمر التعديل المطلوب: {q}\n\n"
-                    "نفذ التعديل بدقة على الجدول (إضافة صفوف جديدة، تعديل قيم، حذف صفوف، أو إعادة بناء البيانات).\n"
-                    "أرجع JSON بهذا الهيكل الدقيق:\n"
-                    '{"reply": "رسالة تأكيد قصيرة طبيعية بدون إشارة للذكاء الاصطناعي", "title": "عنوان اللوحة", "cols": [...], "rows": [[...], [...]]}'
-                )
-                ai_data = ai_ask_json(prompt, "أنت محلل بيانات محترف تقوم بتحديث الجداول بدقة.")
-                if ai_data and isinstance(ai_data.get("rows"), list) and len(ai_data["rows"]) > 0:
-                    board["title"] = ai_data.get("title", board.get("title", "لوحة التحكم"))
-                    cols = ai_data.get("cols", cols)
-                    rows = ai_data["rows"]
-                    ai_reply = f"✅ {ai_data.get('reply', 'تم تحديث البيانات بنجاح.')}"
-                else:
-                    ai_reply = "⚠️ تعذر معالجة التعديل حالياً، يرجى المحاولة مرة أخرى."
-        board["cols"], board["rows"] = cols, rows
-        sb("PATCH", "self_learning_logs", {"lesson_learned": json.dumps(board, ensure_ascii=False)}, q=f"?id=eq.{bid}")
+        edit_req = request.form.get("edit_req", "").strip()
+        if edit_req:
+            prompt = f"الكود الحالي:\n{html_code}\n\nالتعديل المطلوب: {edit_req}\nأرجع كود HTML الكامل والمحدث فقط."
+            updated = ai_ask(prompt, "أنت مطور واجهات ويب محترف.")
+            if updated:
+                clean_html = updated.replace("```html", "").replace("```", "").strip()
+                if "<html" in clean_html.lower() or "<body" in clean_html.lower() or "<div" in clean_html.lower():
+                    html_code = apply_saudi_governance("موقع", clean_html)
+                    sb("PATCH", "self_learning_logs", {"lesson_learned": html_code}, q=f"?id=eq.{sid}")
 
-    labels = [str(r[0]) if isinstance(r, list) and r else str(r) for r in rows[:12] if r]
-    values = []
-    for r in rows[:12]:
-        num = 0
-        for cell in r:
-            try:
-                val = float(str(cell).replace("%", "").strip())
-                if val > 0:
-                    num = val
-                    break
+    edit_bar = """
+    <div id='live-editor-bar' dir='rtl' style='position:fixed;bottom:12px;left:12px;right:12px;z-index:99999;background:rgba(15,23,42,0.95);border:1px solid #334155;padding:10px 14px;border-radius:14px;display:flex;gap:8px;align-items:center;box-shadow:0 10px 25px rgba(0,0,0,0.4);font-family:sans-serif;'>
+      <form method='POST' style='display:flex;gap:8px;width:100%;margin:0;'>
+        <input name='edit_req' placeholder='اكتب أي تعديل على تصميم الموقع أو ألوانه ومحتواه ليتم تطبيقه فوراً...' style='flex:1;padding:8px 12px;border-radius:8px;border:1px solid #475569;background:#020617;color:#fff;font-size:13px;' required>
+        <button type='submit' style='background:#0284c7;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-weight:bold;cursor:pointer;font-size:13px;'>تحديث الصفحة</button>
+        <button type='button' onclick="document.getElementById('live-editor-bar').style.display='none'" style='background:#334155;color:#cbd5e1;border:none;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:12px;'>إخفاء</button>
+      </form>
+    </div>
+    """
+    return f"{html_code}\n{edit_bar}"
             except ValueError:
                 continue
-            clean_html = updated.replace("```html", "").replace("```", "").strip()
-            if "<html" in clean_html.lower() or "<body" in clean_html.lower() or "<div" in clean_html.lower():
-                html_code = apply_saudi_governance("موقع", clean_html)
-                sb("PATCH", "self_learning_logs", {"lesson_learned": html_code}, q=f"?id=eq.{sid}")
-    edit_bar = """
-    <div id='live-editor-bar' dir='rtl' style='position:fixed;bottom:12px;left:12px;right:12px;z-index:99999;background:rgba(15,23,42,0.95);border:1px solid #334155;padding:10px 14px;border-radius:14px;display:flex;gap:8px;align-items:center;box-shadow:0 10px 25px rgba(0,0,0,0.4);font-family:sans-serif;'>
-      <form method='POST' style='display:flex;gap:8px;width:100%;margin:0;'>
-        <input name='edit_req' placeholder='اكتب أي تعديل على تصميم الموقع أو ألوانه ومحتواه ليتم تطبيقه فوراً...' style='flex:1;padding:8px 12px;border-radius:8px;border:1px solid #475569;background:#020617;color:#fff;font-size:13px;' required>
-        <button type='submit' style='background:#0284c7;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-weight:bold;cursor:pointer;font-size:13px;'>تحديث الصفحة</button>
-        <button type='button' onclick="document.getElementById('live-editor-bar').style.display='none'" style='background:#334155;color:#cbd5e1;border:none;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:12px;'>إخفاء</button>
-      </form>
-    </div>
-    """
-    return f"{html_code}\n{edit_bar}"
-
-
 @app.route("/timeline", methods=["GET"])
 def performance_timeline():
     kpis = sb("GET", "telemetry_kpis", q="?order=id.desc&limit=30") or []
@@ -198,22 +114,6 @@ HELP_MENU = (
     "• لتعديل آخر مخرج فوراً: اكتب *(تعديل: ملاحظتك هنا)*\n"
     "• لفحص وتطوير النظام: اكتب *(اقترح تطوير)*"
 )
-            clean_html = updated.replace("```html", "").replace("```", "").strip()
-            if "<html" in clean_html.lower() or "<body" in clean_html.lower() or "<div" in clean_html.lower():
-                html_code = apply_saudi_governance("موقع", clean_html)
-                sb("PATCH", "self_learning_logs", {"lesson_learned": html_code}, q=f"?id=eq.{sid}")
-    edit_bar = """
-    <div id='live-editor-bar' dir='rtl' style='position:fixed;bottom:12px;left:12px;right:12px;z-index:99999;background:rgba(15,23,42,0.95);border:1px solid #334155;padding:10px 14px;border-radius:14px;display:flex;gap:8px;align-items:center;box-shadow:0 10px 25px rgba(0,0,0,0.4);font-family:sans-serif;'>
-      <form method='POST' style='display:flex;gap:8px;width:100%;margin:0;'>
-        <input name='edit_req' placeholder='اكتب أي تعديل على تصميم الموقع أو ألوانه ومحتواه ليتم تطبيقه فوراً...' style='flex:1;padding:8px 12px;border-radius:8px;border:1px solid #475569;background:#020617;color:#fff;font-size:13px;' required>
-        <button type='submit' style='background:#0284c7;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-weight:bold;cursor:pointer;font-size:13px;'>تحديث الصفحة</button>
-        <button type='button' onclick="document.getElementById('live-editor-bar').style.display='none'" style='background:#334155;color:#cbd5e1;border:none;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:12px;'>إخفاء</button>
-      </form>
-    </div>
-    """
-    return f"{html_code}\n{edit_bar}"
-
-
 @app.route("/timeline", methods=["GET"])
 def performance_timeline():
     kpis = sb("GET", "telemetry_kpis", q="?order=id.desc&limit=30") or []
@@ -298,6 +198,8 @@ HELP_MENU = (
     "• لتعديل آخر مخرج فوراً: اكتب *(تعديل: ملاحظتك هنا)*\n"
     "• لفحص وتطوير النظام: اكتب *(اقترح تطوير)*"
 )
+
+
 def _is_authorized(cid: str, sender: str) -> bool:
     if ALLOWED_GROUP and (cid == ALLOWED_GROUP or ALLOWED_GROUP in cid):
         return True
@@ -320,12 +222,11 @@ def _is_authorized(cid: str, sender: str) -> bool:
 def _run_with_tip(fn, cid, task):
     fn(cid, task)
     send_msg(cid, "💡 *لتعديل هذا المخرج وإعادة إنتاجه فوراً وفق ملاحظتك، أرسل:*\n`تعديل: [اكتب التعديل المطلوب هنا]`")
-
-
 def _dispatch_smart(cid: str, txt: str, sname: str):
     clean = txt.strip()
     user_tag = sname.strip() if sname and sname.strip() != "User" else "admin"
-    is_admin_user = (ADMIN_PHONE and ADMIN_PHONE in "".join(filter(str.isdigit, cid.split("@")[0])))
+    cid_digits = "".join(filter(str.isdigit, cid.split("@"))) if cid else ""
+    is_admin_user = bool(ADMIN_PHONE and cid_digits == ADMIN_PHONE)
 
     if any(k in clean for k in ("القائمة", "المساعدة", "الخدمات", "/help", "قدراتك", "ايش تقدر تسوي", "وش تقدر تسوي")):
         send_msg(cid, HELP_MENU)
@@ -417,8 +318,6 @@ def _dispatch_smart(cid: str, txt: str, sname: str):
             EXECUTOR.submit(safe_run, make_voice_note, cid, task)
         else:
             EXECUTOR.submit(safe_run, run_task, cid, task, user_tag, sname)
-
-
 def _build_live_site(cid: str, task: str):
     send_msg(cid, "🌐 جاري تصميم وبرمجة الموقع وتجهيز رابط المعاينة والتعديل المباشر...")
     prompt = (
@@ -434,7 +333,13 @@ def _build_live_site(cid: str, task: str):
 
     clean_html = apply_saudi_governance(task, clean_html)
     saved = sb("POST", "self_learning_logs", {"user_role": "live_site", "lesson_learned": clean_html, "is_active": True})
-    sid = saved.get("id", 1) if isinstance(saved, list) and saved else 1
+    if isinstance(saved, list) and saved:
+        sid = saved[0].get("id", 1)
+    elif isinstance(saved, dict):
+        sid = saved.get("id", 1)
+    else:
+        sid = 1
+
     base_url = os.environ.get("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
     site_link = f"{base_url}/site/{sid}" if base_url else f"/site/{sid}"
     send_msg(cid, f"🌐 *تم تصميم وإطلاق الموقع بنجاح!*\n\n🔗 *رابط الموقع المباشر (مع أداة التعديل الفوري أسفل الصفحة):*\n{site_link}\n\n💡 يمكنك أيضاً كتابة `تعديل: [وصف التعديل]` هنا في المحادثة لإعادة بنائه.")
@@ -456,7 +361,8 @@ def _push_to_github(cid: str, task: str):
     full_name = repo_info.get("full_name", "")
     html_url = repo_info.get("html_url", "")
     code_content = ai_ask(task, "اكتب الكود البرمجي الكامل والاحترافي لهذا المشروع بدون مقدمات أو شرح:", mode="general", use_cache=False)
-    b64_code = base64.b64encode(code_content.encode("utf-8")).decode("utf-8")
+    clean_code = code_content.replace("```html", "").replace("```", "").strip()
+    b64_code = base64.b64encode(clean_code.encode("utf-8")).decode("utf-8")
     requests.put(f"https://github.com{full_name}/contents/index.html", headers=headers, json={"message": "Initial commit", "content": b64_code}, timeout=20)
     send_msg(cid, f"✅ *تم إنشاء المستودع ورفع المشروع على GitHub بنجاح:*\n{html_url}")
 

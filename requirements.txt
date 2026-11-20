@@ -1,9 +1,11 @@
-# === 1. الخادم والأداء العالي (Web & Fast Serialization) ===
+# === 1. الخادم والاتصال فائق السرعة (Core Server & Fast HTTP) ===
 flask
 gunicorn
 requests
+httpx
 orjson
 cachetools
+pydantic
 
 # === 2. الذكاء الاصطناعي والبحث الحي (AI & Search) ===
 duckduckgo-search
@@ -11,27 +13,35 @@ beautifulsoup4
 lxml
 tenacity
 
-# === 3. الأمن السيبراني والتشفير (Cybersecurity & Vault) ===
+# === 3. الأمن السيبراني والتعقيم والتشفير (Cybersecurity & Vault) ===
 cryptography
 pyjwt
+bleach
 
-# === 4. الصوت السعودي البشري والوسائط (Voice & Vision) ===
+# === 4. الصوت السعودي، PDF، والوسائط (Voice, PDF & Office) ===
 edge-tts
 pillow
 pypdf
+pdfplumber
 python-docx
 openpyxl
 python-pptx
+reportlab
+qrcode
+markdown
 
-# === 5. علم البيانات، الإحصاء، والرسوم البيانية الاحترافية (Data Science & Charts) ===
+# === 5. علم البيانات، التنبؤ، والرسوم البيانية (Data Science & ML) ===
 numpy
 pandas
 scipy
+scikit-learn
 matplotlib
 seaborn
+plotly
 
-# === 6. معالجة اللغة العربية والتقويم الهجري (Arabic NLP & Calendar) ===
+# === 6. معالجة اللغة العربية والتقويم الهجري والمواقع (Arabic NLP & Geo) ===
 arabic-reshaper
 python-bidi
 pendulum
 hijridate
+geopy

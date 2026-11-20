@@ -15,9 +15,10 @@ def _keys(prefix: str):
     if single:
         vals.append(single)
     for idx in range(1, 10):
-        v = os.environ.get(f"{prefix}_{idx}", "").strip()
-        if v and v not in vals:
-            vals.append(v)
+        for fmt in (f"{prefix}_{idx}", f"{prefix}{idx}"):
+            v = os.environ.get(fmt, "").strip()
+            if v and v not in vals:
+                vals.append(v)
     return vals
 
 
@@ -31,12 +32,16 @@ GROQ_KEYS = _keys("GROQ_API_KEY")
 SAMBA_KEYS = _keys("SAMBANOVA_API_KEY")
 COHERE_KEYS = _keys("COHERE_API_KEY")
 OR_KEYS = _keys("OPENROUTER_API_KEY")
-CF_ACCOUNT = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
-CF_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
+CF_ACCOUNT = (os.environ.get("CF_ACCOUNT_ID") or os.environ.get("CLOUDFLARE_ACCOUNT_ID") or "").strip()
+CF_TOKEN = (os.environ.get("CF_API_KEY") or os.environ.get("CLOUDFLARE_API_TOKEN") or "").strip()
 
-GREEN_ID = os.environ.get("GREEN_ID_INSTANCE", "").strip()
+GREEN_ID = (os.environ.get("GREEN_API_ID") or os.environ.get("GREEN_ID_INSTANCE") or "").strip()
 GREEN_TOKEN = os.environ.get("GREEN_API_TOKEN", "").strip()
-GREEN_BASE = "".join(["https:/", "/api.green-api.", "com/waInstance"])
+_raw_green_url = (os.environ.get("GREEN_API_URL") or "").strip().rstrip("/")
+if _raw_green_url:
+    GREEN_BASE = _raw_green_url if _raw_green_url.endswith("waInstance") else f"{_raw_green_url}/waInstance"
+else:
+    GREEN_BASE = "".join(["https:/", "/api.green-api.", "com/waInstance"])
 
 
 def sb(method: str, table: str, data=None, q: str = ""):
@@ -111,8 +116,6 @@ def _ask_cloudflare(prompt: str, system: str, temp: float):
     if r.status_code == 200:
         return r.json().get("result", {}).get("response", "").strip()
     return None
-
-
 def ai_ask(prompt: str, system: str = "", temperature: float = 0.4, mode: str = "general", use_cache: bool = True) -> str:
     t0 = time.time()
     if use_cache:
@@ -197,7 +200,8 @@ def send_msg(cid: str, text: str):
         return
     url = f"{GREEN_BASE}{GREEN_ID}/sendMessage/{GREEN_TOKEN}"
     try:
-        SESSION.post(url, json={"chatId": cid, "message": text}, timeout=15)
+        r = SESSION.post(url, json={"chatId": cid, "message": text}, timeout=15)
+        print(f"OUT [{r.status_code}] -> {cid}: {r.text[:100]}", flush=True)
         BUS.publish("channel.whatsapp_sent", {"cid": cid, "chars": len(text)})
     except Exception as exc:
         print(f"SendMsg Err: {exc}", flush=True)
@@ -211,7 +215,8 @@ def send_file(cid: str, file_path: str, file_name: str, mime_type: str = "", cap
         with open(file_path, "rb") as f:
             files = {"file": (file_name, f, mime_type or "application/octet-stream")}
             data = {"chatId": cid, "fileName": file_name, "caption": caption}
-            SESSION.post(url, data=data, files=files, timeout=45)
+            r = SESSION.post(url, data=data, files=files, timeout=45)
+        print(f"OUT_FILE [{r.status_code}] -> {cid}: {r.text[:100]}", flush=True)
         BUS.publish("channel.whatsapp_file_sent", {"cid": cid, "file": file_name})
     except Exception as exc:
         print(f"SendFile Err: {exc}", flush=True)

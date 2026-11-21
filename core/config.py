@@ -1,9 +1,14 @@
 import os
 import random
-from datetime import timezone, timedelta
+from datetime import timedelta, timezone
 
 # توقيت الرياض الموحد للنظام
 RIYADH_TZ = timezone(timedelta(hours=3))
+
+
+def _env(key: str, default: str = "") -> str:
+    """قراءة وتنظيف متغير البيئة بأمان."""
+    return os.environ.get(key, default).strip()
 
 
 def digits_only(val: str) -> str:
@@ -13,15 +18,13 @@ def digits_only(val: str) -> str:
 
 def load_api_keys(prefix: str) -> list[str]:
     """جلب مفاتيح API الأساسية والاحتياطية بدون تكرار."""
-    keys = []
-    base = os.environ.get(prefix, "").strip()
-    if base:
+    keys: list[str] = []
+    if base := _env(prefix):
         keys.append(base)
     for i in range(1, 10):
         for fmt in (f"{prefix}_{i}", f"{prefix}{i}"):
-            k = os.environ.get(fmt, "").strip()
-            if k and k not in keys:
-                keys.append(k)
+            if (key := _env(fmt)) and key not in keys:
+                keys.append(key)
     return keys
 
 
@@ -34,27 +37,28 @@ def rotated_keys(keys: list[str]) -> list[str]:
 
 
 # --- أرقام الإدارة والصلاحيات ---
-ADMIN_PHONE = digits_only(os.environ.get("ADMIN_PHONE", ""))
-PARTNER_PHONE = digits_only(os.environ.get("AHMED_PHONE", ""))
-ALLOWED_GROUP = os.environ.get("ALLOWED_GROUP", "").strip()
+ADMIN_PHONE = digits_only(_env("ADMIN_PHONE"))
+PARTNER_PHONE = digits_only(_env("AHMED_PHONE"))
+ALLOWED_GROUP = _env("ALLOWED_GROUP")
 
 # --- روابط وإعدادات السحابة والخدمات ---
-RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
-GITHUB_REPO = os.environ.get("GITHUB_REPO", "albaraa-ismail/Albaraa-AI-OS").strip()
-GITHUB_API = "https://github.com"
+RENDER_URL = _env("RENDER_EXTERNAL_URL").rstrip("/")
+GITHUB_TOKEN = _env("GITHUB_TOKEN")
+GITHUB_REPO = _env("GITHUB_REPO", "albaraa-ismail/Albaraa-AI-OS")
+GITHUB_API = "https://api.github.com"
 
 # --- قاعدة البيانات Supabase ---
-SB_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
-SB_KEY = os.environ.get("SUPABASE_KEY", "").strip()
+SB_URL = _env("SUPABASE_URL").rstrip("/")
+SB_KEY = _env("SUPABASE_KEY")
 
 # --- بوابة واتساب Green API ---
-GREEN_ID = (os.environ.get("GREEN_API_ID") or os.environ.get("GREEN_ID_INSTANCE") or "").strip()
-GREEN_TOKEN = os.environ.get("GREEN_API_TOKEN", "").strip()
-_raw_green = (os.environ.get("GREEN_API_URL") or "").strip().rstrip("/")
+GREEN_ID = _env("GREEN_API_ID") or _env("GREEN_ID_INSTANCE")
+GREEN_TOKEN = _env("GREEN_API_TOKEN")
+_raw_green = _env("GREEN_API_URL").rstrip("/")
 GREEN_BASE = (
     (_raw_green if _raw_green.endswith("waInstance") else f"{_raw_green}/waInstance")
-    if _raw_green else "https://green-api.com"
+    if _raw_green
+    else "https://green-api.com"
 )
 
 # --- مفاتيح وروابط نماذج الذكاء الاصطناعي ---
@@ -64,13 +68,13 @@ SAMBA_KEYS = load_api_keys("SAMBANOVA_API_KEY")
 COHERE_KEYS = load_api_keys("COHERE_API_KEY")
 OR_KEYS = load_api_keys("OPENROUTER_API_KEY")
 
-CF_ACCOUNT = (os.environ.get("CF_ACCOUNT_ID") or os.environ.get("CLOUDFLARE_ACCOUNT_ID") or "").strip()
-CF_TOKEN = (os.environ.get("CF_API_KEY") or os.environ.get("CLOUDFLARE_API_TOKEN") or "").strip()
+CF_ACCOUNT = _env("CF_ACCOUNT_ID") or _env("CLOUDFLARE_ACCOUNT_ID")
+CF_TOKEN = _env("CF_API_KEY") or _env("CLOUDFLARE_API_TOKEN")
 
-FISH_KEY = os.environ.get("FISH_API_KEY", "").strip()
-MY_VOICE_ID = os.environ.get("MY_VOICE_ID", "").strip()
+FISH_KEY = _env("FISH_API_KEY")
+MY_VOICE_ID = _env("MY_VOICE_ID")
 
-URLS = {
+URLS: dict[str, str] = {
     "gemini": "https://googleapis.com",
     "groq_chat": "https://groq.com",
     "groq_audio": "https://groq.com",

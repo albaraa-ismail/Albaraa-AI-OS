@@ -1,60 +1,29 @@
 import os
 import json
 import time
-import random
 import requests
+from core.config import (
+    SB_URL, SB_KEY, GREEN_ID, GREEN_TOKEN, GREEN_BASE,
+    GEM_KEYS, GROQ_KEYS, SAMBA_KEYS, COHERE_KEYS, OR_KEYS,
+    CF_ACCOUNT, CF_TOKEN, URLS, rotated_keys
+)
 from core.failover_cache import SMART_CACHE, FAILOVER
 from core.event_bus import BUS
 
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "Albaraa-AI-OS/3.0"})
 
-
-def _keys(prefix: str):
-    vals = []
-    single = os.environ.get(prefix, "").strip()
-    if single:
-        vals.append(single)
-    for idx in range(1, 10):
-        for fmt in (f"{prefix}_{idx}", f"{prefix}{idx}"):
-            v = os.environ.get(fmt, "").strip()
-            if v and v not in vals:
-                vals.append(v)
-    return vals
-
-
-def _rotated(keys_list: list) -> list:
-    if len(keys_list) <= 1:
-        return list(keys_list)
-    shift = random.randint(0, len(keys_list) - 1)
-    return keys_list[shift:] + keys_list[:shift]
-
-
-SB_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
-SB_KEY = os.environ.get("SUPABASE_KEY", "").strip()
-GEMINI_BASE_URL = "".join(["https:/", "/generativelanguage.googleapis.", "com/v1beta/models/"])
-
-GEM_KEYS = _keys("GEMINI_API_KEY")
-GEM_KEY = GEM_KEYS if GEM_KEYS else ""
-GROQ_KEYS = _keys("GROQ_API_KEY")
-SAMBA_KEYS = _keys("SAMBANOVA_API_KEY")
-COHERE_KEYS = _keys("COHERE_API_KEY")
-OR_KEYS = _keys("OPENROUTER_API_KEY")
-CF_ACCOUNT = (os.environ.get("CF_ACCOUNT_ID") or os.environ.get("CLOUDFLARE_ACCOUNT_ID") or "").strip()
-CF_TOKEN = (os.environ.get("CF_API_KEY") or os.environ.get("CLOUDFLARE_API_TOKEN") or "").strip()
-
-GREEN_ID = (os.environ.get("GREEN_API_ID") or os.environ.get("GREEN_ID_INSTANCE") or "").strip()
-GREEN_TOKEN = os.environ.get("GREEN_API_TOKEN", "").strip()
-_raw_green_url = (os.environ.get("GREEN_API_URL") or "").strip().rstrip("/")
-if _raw_green_url:
-    GREEN_BASE = _raw_green_url if _raw_green_url.endswith("waInstance") else f"{_raw_green_url}/waInstance"
-else:
-    GREEN_BASE = "".join(["https:/", "/api.green-api.", "com/waInstance"])
+# متغيرات توافقية لباقي وحدات النظام
+GEMINI_BASE_URL = URLS["gemini"]
+GEM_KEY = GEM_KEYS[0] if GEM_KEYS else ""
+_rotated = rotated_keys
 
 
 def sb(method: str, table: str, data=None, q: str = ""):
+    """التعامل المباشر مع جداول Supabase."""
     if not SB_URL or not SB_KEY:
         return [] if method.upper() == "GET" else None
+
     url = f"{SB_URL}/rest/v1/{table}{q}"
     headers = {
         "apikey": SB_KEY,
@@ -71,16 +40,18 @@ def sb(method: str, table: str, data=None, q: str = ""):
     return [] if method.upper() == "GET" else None
 
 
+def _build_messages(prompt: str, system: str) -> list[dict]:
+    msgs = [{"role": "system", "content": system}] if system else []
+    msgs.append({"role": "user", "content": prompt})
+    return msgs
+
+
 def _ask_openai_compat(base_url: str, key: str, model: str, prompt: str, system: str, temp: float):
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-    msgs = []
-    if system:
-        msgs.append({"role": "system", "content": system})
-    msgs.append({"role": "user", "content": prompt})
-    payload = {"model": model, "messages": msgs, "temperature": temp, "max_tokens": 2048}
+    payload = {"model": model, "messages": _build_messages(prompt, system), "temperature": temp, "max_tokens": 2048}
     r = SESSION.post(base_url, headers=headers, json=payload, timeout=22)
     if r.status_code == 200:
-        return r.json()["choices"]["message"]["content"].strip()
+        return r.json()["choices"][0]["message"]["content"].strip()
     return None
 
 
@@ -91,39 +62,30 @@ def _ask_gemini(key: str, prompt: str, system: str, temp: float):
         "generationConfig": {"temperature": temp, "maxOutputTokens": 2048},
     }
     for model in ("gemini-2.0-flash", "gemini-1.5-flash"):
-        url = f"{GEMINI_BASE_URL}{model}:generateContent?key={key}"
+        url = f"{URLS['gemini']}{model}:generateContent?key={key}"
         r = SESSION.post(url, json=payload, timeout=22)
         if r.status_code == 200:
-            return r.json()["candidates"]["content"]["parts"]["text"].strip()
+            return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
     return None
 
 
 def _ask_cohere(key: str, prompt: str, system: str, temp: float):
-    url = "".join(["https:/", "/api.cohere.", "com/v2/chat"])
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-    msgs = []
-    if system:
-        msgs.append({"role": "system", "content": system})
-    msgs.append({"role": "user", "content": prompt})
-    r = SESSION.post(url, headers=headers, json={"model": "command-r-plus-08-2024", "messages": msgs, "temperature": temp}, timeout=22)
+    payload = {"model": "command-r-plus-08-2024", "messages": _build_messages(prompt, system), "temperature": temp}
+    r = SESSION.post(URLS["cohere"], headers=headers, json=payload, timeout=22)
     if r.status_code == 200:
-        return r.json()["message"]["content"]["text"].strip()
+        return r.json()["message"]["content"][0]["text"].strip()
     return None
-
-
-def _ask_cloudflare(prompt: str, system: str, temp: float):
+    def _ask_cloudflare(prompt: str, system: str, temp: float):
     if not CF_ACCOUNT or not CF_TOKEN:
         return None
-    url = f"https://cloudflare.com{CF_ACCOUNT}/ai/run/@cf/meta/llama-3.3-70b-instruct-fp8-fast"
     headers = {"Authorization": f"Bearer {CF_TOKEN}", "Content-Type": "application/json"}
-    msgs = []
-    if system:
-        msgs.append({"role": "system", "content": system})
-    msgs.append({"role": "user", "content": prompt})
-    r = SESSION.post(url, headers=headers, json={"messages": msgs, "temperature": temp}, timeout=22)
+    r = SESSION.post(URLS["cloudflare"], headers=headers, json={"messages": _build_messages(prompt, system), "temperature": temp}, timeout=22)
     if r.status_code == 200:
         return r.json().get("result", {}).get("response", "").strip()
     return None
+
+
 def ai_ask(prompt: str, system: str = "", temperature: float = 0.4, mode: str = "general", use_cache: bool = True) -> str:
     t0 = time.time()
     if use_cache:
@@ -132,61 +94,27 @@ def ai_ask(prompt: str, system: str = "", temperature: float = 0.4, mode: str = 
             BUS.publish("ai.cache_hit", {"mode": mode, "latency_ms": round((time.time() - t0) * 1000, 1)})
             return cached
 
-    providers = []
-    groq_url = "".join(["https:/", "/api.groq.", "com/openai/v1/chat/completions"])
-    samba_url = "".join(["https:/", "/api.sambanova.", "ai/v1/chat/completions"])
-    or_url = "".join(["https:/", "/openrouter.", "ai/api/v1/chat/completions"])
+    pools = {
+        "gemini": rotated_keys(GEM_KEYS),
+        "cohere": rotated_keys(COHERE_KEYS),
+        "groq": rotated_keys(GROQ_KEYS),
+        "samba": rotated_keys(SAMBA_KEYS),
+        "openrouter": rotated_keys(OR_KEYS),
+        "cloudflare": ["cf"] if (CF_ACCOUNT and CF_TOKEN) else [],
+    }
+    order = {
+        "arabic": ["gemini", "cohere", "groq", "samba", "cloudflare", "openrouter"],
+        "fast": ["groq", "samba", "cloudflare", "gemini", "openrouter"],
+    }.get(mode, ["groq", "gemini", "samba", "cohere", "cloudflare", "openrouter"])
 
-    gem_pool = _rotated(GEM_KEYS)
-    cohere_pool = _rotated(COHERE_KEYS)
-    groq_pool = _rotated(GROQ_KEYS)
-    samba_pool = _rotated(SAMBA_KEYS)
-    or_pool = _rotated(OR_KEYS)
-
-    if mode == "arabic":
-        for k in gem_pool:
-            providers.append(("gemini", k))
-        for k in cohere_pool:
-            providers.append(("cohere", k))
-        for k in groq_pool:
-            providers.append(("groq", k))
-        for k in samba_pool:
-            providers.append(("samba", k))
-        if CF_ACCOUNT and CF_TOKEN:
-            providers.append(("cloudflare", "cf"))
-        for k in or_pool:
-            providers.append(("openrouter", k))
-    elif mode == "fast":
-        for k in groq_pool:
-            providers.append(("groq", k))
-        for k in samba_pool:
-            providers.append(("samba", k))
-        if CF_ACCOUNT and CF_TOKEN:
-            providers.append(("cloudflare", "cf"))
-        for k in gem_pool:
-            providers.append(("gemini", k))
-        for k in or_pool:
-            providers.append(("openrouter", k))
-    else:
-        for k in groq_pool:
-            providers.append(("groq", k))
-        for k in gem_pool:
-            providers.append(("gemini", k))
-        for k in samba_pool:
-            providers.append(("samba", k))
-        for k in cohere_pool:
-            providers.append(("cohere", k))
-        if CF_ACCOUNT and CF_TOKEN:
-            providers.append(("cloudflare", "cf"))
-        for k in or_pool:
-            providers.append(("openrouter", k))
+    providers = [(p, k) for p in order for k in pools[p]]
 
     def _run_provider(prov):
         ptype, key = prov
         if ptype == "groq":
-            return _ask_openai_compat(groq_url, key, "llama-3.3-70b-versatile", prompt, system, temperature)
+            return _ask_openai_compat(URLS["groq_chat"], key, "llama-3.3-70b-versatile", prompt, system, temperature)
         if ptype == "samba":
-            return _ask_openai_compat(samba_url, key, "Meta-Llama-3.3-70B-Instruct", prompt, system, temperature)
+            return _ask_openai_compat(URLS["samba"], key, "Meta-Llama-3.3-70B-Instruct", prompt, system, temperature)
         if ptype == "gemini":
             return _ask_gemini(key, prompt, system, temperature)
         if ptype == "cohere":
@@ -194,7 +122,7 @@ def ai_ask(prompt: str, system: str = "", temperature: float = 0.4, mode: str = 
         if ptype == "cloudflare":
             return _ask_cloudflare(prompt, system, temperature)
         if ptype == "openrouter":
-            return _ask_openai_compat(or_url, key, "meta-llama/llama-3.3-70b-instruct:free", prompt, system, temperature)
+            return _ask_openai_compat(URLS["openrouter"], key, "meta-llama/llama-3.3-70b-instruct:free", prompt, system, temperature)
         return None
 
     answer = FAILOVER.execute_chain(providers, _run_provider)

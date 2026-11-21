@@ -1,4 +1,4 @@
-# === 1. الخادم والاتصال فائق السرعة (Core Server & Fast HTTP) ===
+# === 1. الخادم والشبكة والبيانات (Server & Core) ===
 flask
 gunicorn
 requests

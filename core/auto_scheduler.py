@@ -1,55 +1,72 @@
 import ast
-import json
-import time
 import base64
+import json
 import threading
-import requests
+import time
 from datetime import datetime
-from core.config import RIYADH_TZ, ADMIN_PHONE, GITHUB_TOKEN, GITHUB_REPO, GITHUB_API
-from core.core_ai import sb, ai_ask_json, send_msg
+from typing import Any, Optional
+import requests
+
+from core.config import ADMIN_PHONE, GITHUB_API, GITHUB_REPO, GITHUB_TOKEN, RIYADH_TZ
+from core.core_ai import ai_ask_json, sb, send_msg
 from core.event_bus import BUS
 from telemetry.evolution_engine import analyze_system_evolution, check_due_reminders
 
 
 def _validate_python_syntax(code_str: str) -> tuple[bool, str]:
+    """فحص سلامة الصياغة البرمجية للكود المقترح عبر شجرة AST."""
     try:
         ast.parse(code_str)
         return True, "تم اجتياز فحص القواعد البرمجية (AST) بنجاح 100%"
-    except SyntaxError as e:
-        return False, f"خطأ برمجي في السطر {e.lineno}: {e.msg}"
+    except SyntaxError as exc:
+        return False, f"خطأ برمجي في السطر {exc.lineno}: {exc.msg}"
 
 
-def _gh_headers() -> dict:
+def _gh_headers() -> dict[str, str]:
     return {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
 
 
-def _load_proposal(pid: int) -> dict | None:
+def _load_proposal(pid: int) -> Optional[dict[str, Any]]:
     res = sb("GET", "self_learning_logs", q=f"?id=eq.{pid}")
     if not res:
         return None
-    rec = res[0] if isinstance(res, list) else res
+    rec = res if isinstance(res, list) else res
     try:
         return json.loads(rec.get("lesson_learned", "{}"))
-    except Exception:
+    except json.JSONDecodeError:
         return None
 
 
-def _push_github_file(target_file: str, content_str: str, commit_msg: str, sha: str | None = None) -> int:
+def _get_github_file(target_file: str) -> tuple[str, Optional[str]]:
+    """جلب محتوى ملف من GitHub مع رمز SHA الخاص به."""
+    url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{target_file}"
+    res = requests.get(url, headers=_gh_headers(), timeout=15)
+    if res.status_code == 200:
+        data = res.json()
+        content = base64.b64decode(data.get("content", "")).decode("utf-8", errors="ignore")
+        return content, data.get("sha")
+    return "", None
+
+
+def _push_github_file(target_file: str, content_str: str, commit_msg: str, sha: Optional[str] = None) -> int:
+    """رفع أو تحديث ملف في مستودع GitHub."""
     url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{target_file}"
     b64_data = base64.b64encode(content_str.encode("utf-8")).decode("utf-8")
-    payload = {"message": commit_msg, "content": b64_data}
+    payload: dict[str, Any] = {"message": commit_msg, "content": b64_data}
     if sha:
         payload["sha"] = sha
-    r = requests.put(url, headers=_gh_headers(), json=payload, timeout=20)
-    return r.status_code
+    res = requests.put(url, headers=_gh_headers(), json=payload, timeout=20)
+    return res.status_code
 
 
-def propose_safe_upgrade(topic: str = "تحسين سرعة الاستجابة وجودة المخرجات"):
+def propose_safe_upgrade(topic: str = "تحسين سرعة الاستجابة وجودة المخرجات") -> None:
+    """توليد مقترح تطوير برمجي آمن وفحصه قبل إرساله للمدير."""
     if not ADMIN_PHONE:
         return
+
     admin_cid = f"{ADMIN_PHONE}@c.us"
     logs = sb("GET", "self_learning_logs", q="?order=id.desc&limit=10") or []
-    recent_notes = "\n".join([str(x.get("lesson_learned", ""))[:120] for x in logs if isinstance(x, dict)])
+    recent_notes = "\n".join(str(x.get("lesson_learned", ""))[:120] for x in logs if isinstance(x, dict))
 
     prompt = (
         f"بناءً على سجل التفاعل والملاحظات الأخيرة:\n{recent_notes}\n\n"
@@ -74,9 +91,9 @@ def propose_safe_upgrade(topic: str = "تحسين سرعة الاستجابة و
     saved = sb("POST", "self_learning_logs", {
         "user_role": "evolution_proposal",
         "lesson_learned": json.dumps(proposal, ensure_ascii=False),
-        "is_active": True
+        "is_active": True,
     })
-    pid = saved[0].get("id", 0) if isinstance(saved, list) and saved else 0
+    pid = saved.get("id", 0) if isinstance(saved, list) and saved else 0
     if not pid:
         return
 
@@ -93,7 +110,10 @@ def propose_safe_upgrade(topic: str = "تحسين سرعة الاستجابة و
         f"❌ *للرفض والحذف اكتب:* `رفض التطوير {pid}`"
     )
     send_msg(admin_cid, msg)
-    def get_proposal_code(pid: int) -> str:
+
+
+def get_proposal_code(pid: int) -> str:
+    """عرض الكود البرمجي الكامل لمقترح التطوير قبل الاعتماد."""
     prop = _load_proposal(pid)
     if not prop:
         return "⚠️ لم يتم العثور على مقترح التطوير المطلوب."
@@ -106,6 +126,7 @@ def propose_safe_upgrade(topic: str = "تحسين سرعة الاستجابة و
 
 
 def approve_and_deploy_upgrade(pid: int) -> str:
+    """اعتماد المقترح، أخذ نسخة احتياطية، ودمجه في المستودع."""
     if not GITHUB_TOKEN:
         return "⚠️ للتثبيت المباشر على GitHub، تأكد من إضافة `GITHUB_TOKEN` في إعدادات Render."
     prop = _load_proposal(pid)
@@ -114,20 +135,12 @@ def approve_and_deploy_upgrade(pid: int) -> str:
 
     try:
         target_file = prop.get("target_file", "multimodal/pro_capabilities.py").strip()
-        new_code = prop.get("code", "")
-        url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{target_file}"
-        r_get = requests.get(url, headers=_gh_headers(), timeout=15)
-
-        old_content, sha = "", None
-        if r_get.status_code == 200:
-            file_json = r_get.json()
-            sha = file_json.get("sha")
-            old_content = base64.b64decode(file_json.get("content", "")).decode("utf-8", errors="ignore")
+        old_content, sha = _get_github_file(target_file)
 
         prop["backup_content"] = old_content
         sb("PATCH", "self_learning_logs", {"lesson_learned": json.dumps(prop, ensure_ascii=False)}, q=f"?id=eq.{pid}")
 
-        merged = f"{old_content}\n\n# --- Auto-Approved Upgrade #{pid} ---\n{new_code}\n"
+        merged = f"{old_content}\n\n# --- Auto-Approved Upgrade #{pid} ---\n{prop.get('code', '')}\n"
         status = _push_github_file(target_file, merged, f"Approved Evolution Upgrade #{pid}: {prop.get('title', '')}", sha)
         if status in (200, 201):
             return (
@@ -142,6 +155,7 @@ def approve_and_deploy_upgrade(pid: int) -> str:
 
 
 def rollback_upgrade(pid: int) -> str:
+    """التراجع الفوري واستعادة النسخة الاحتياطية للملف."""
     if not GITHUB_TOKEN:
         return "⚠️ متغير `GITHUB_TOKEN` غير مضبوط في Render."
     prop = _load_proposal(pid)
@@ -153,17 +167,15 @@ def rollback_upgrade(pid: int) -> str:
     if backup is None or not target_file:
         return "⚠️ لا توجد نسخة احتياطية محفوظة لهذا التطوير."
 
-    url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{target_file}"
-    r_get = requests.get(url, headers=_gh_headers(), timeout=15)
-    sha = r_get.json().get("sha") if r_get.status_code == 200 else None
-
+    _, sha = _get_github_file(target_file)
     status = _push_github_file(target_file, backup, f"Rollback Upgrade #{pid}", sha)
     if status in (200, 201):
         return f"↩️ *تم التراجع بنجاح واستعادة النسخة السابقة للملف `{target_file}`.*"
     return f"⚠️ تعذر التراجع (رمز الحالة: {status})."
 
 
-def _scheduler_loop():
+def _scheduler_loop() -> None:
+    """حلقة المراقبة الدورية للتذكيرات والتقارير اليومية."""
     admin_cid = f"{ADMIN_PHONE}@c.us" if ADMIN_PHONE else ""
     last_daily_report = ""
 
@@ -190,8 +202,8 @@ def _scheduler_loop():
         time.sleep(55)
 
 
-def start_scheduler():
-    t = threading.Thread(target=_scheduler_loop, daemon=True)
-    t.start()
+def start_scheduler() -> threading.Thread:
+    thread = threading.Thread(target=_scheduler_loop, daemon=True)
+    thread.start()
     BUS.publish("scheduler.started", {"status": "active"})
-    return t
+    return thread

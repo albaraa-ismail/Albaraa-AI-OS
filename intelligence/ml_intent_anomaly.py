@@ -1,13 +1,12 @@
 import math
 import re
+import threading
 from collections import Counter
-from typing import Dict, Any
+from typing import Any
 
 
 class MLIntentAndAnomalyEngine:
-    """مصنف النوايا وكشف الشذوذ الإحصائي بتعلّم الآلة (Multinomial Likelihood + Z-Score)."""
-
-    TRAINING_CORPUS = {
+    TRAINING_CORPUS: dict[str, list[str]] = {
         "research": [
             "ابحث", "بحث", "معلومات", "مصادر", "مراجع", "تحليل", "مقارنة", "تقرير",
             "دراسة", "احصائيات", "إحصائيات", "اخبار", "أخبار", "تاريخ", "شرح", "فسر",
@@ -28,30 +27,33 @@ class MLIntentAndAnomalyEngine:
         ],
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._lengths = [25, 40, 60, 80, 120, 180, 250]
-        self._vocab = set(w for words in self.TRAINING_CORPUS.values() for w in words)
+        self._vocab = {w for words in self.TRAINING_CORPUS.values() for w in words}
+        self._lock = threading.Lock()
 
-    def _tokenize(self, text: str):
+    @staticmethod
+    def _tokenize(text: str) -> list[str]:
         return re.findall(r"[\w\u0600-\u06FF]+", text.lower())
 
     def _compute_z_score(self, length: int) -> float:
-        mean = sum(self._lengths) / len(self._lengths)
-        variance = sum((x - mean) ** 2 for x in self._lengths) / max(len(self._lengths), 1)
-        std = max(math.sqrt(variance), 15.0)
-        z = abs(length - mean) / std
-        if 5 <= length <= 1500:
-            self._lengths.append(length)
-            if len(self._lengths) > 200:
-                self._lengths.pop(0)
-        return round(z, 2)
+        with self._lock:
+            mean = sum(self._lengths) / len(self._lengths)
+            variance = sum((x - mean) ** 2 for x in self._lengths) / max(len(self._lengths), 1)
+            std = max(math.sqrt(variance), 35.0)
+            z = abs(length - mean) / std
+            if 5 <= length <= 2500:
+                self._lengths.append(length)
+                if len(self._lengths) > 200:
+                    self._lengths.pop(0)
+            return round(z, 2)
 
-    def predict(self, text: str) -> Dict[str, Any]:
+    def predict(self, text: str) -> dict[str, Any]:
         tokens = self._tokenize(text)
         token_counts = Counter(tokens)
         v_size = max(len(self._vocab), 1)
 
-        scores = {}
+        scores: dict[str, tuple[int, float]] = {}
         for intent, keywords in self.TRAINING_CORPUS.items():
             kw_set = set(keywords)
             log_prob = math.log(1.0 / len(self.TRAINING_CORPUS))
@@ -73,7 +75,7 @@ class MLIntentAndAnomalyEngine:
 
         z_score = self._compute_z_score(len(text))
         unique_ratio = len(set(text)) / max(len(text), 1)
-        is_anomaly = (z_score > 4.5) or (len(text) > 30 and unique_ratio < 0.08)
+        is_anomaly = (z_score > 6.5) or (len(text) > 40 and unique_ratio < 0.06)
 
         return {
             "intent": best_intent,

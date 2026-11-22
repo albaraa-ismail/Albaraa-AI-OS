@@ -21,15 +21,15 @@ _rotated = rotated_keys
 
 DEFAULT_TIMEOUT = 45
 MODE_ROUTING: dict[str, list[str]] = {
-    "arabic": ["gemini", "groq", "samba", "cohere", "cloudflare", "openrouter"],
-    "fast": ["groq", "samba", "cloudflare", "gemini", "openrouter"],
-    "general": ["groq", "gemini", "samba", "cohere", "cloudflare", "openrouter"],
+    "arabic": ["gemini", "groq", "cohere", "openrouter", "cloudflare", "samba"],
+    "fast": ["groq", "gemini", "openrouter", "cohere", "cloudflare", "samba"],
+    "general": ["groq", "gemini", "cohere", "openrouter", "cloudflare", "samba"],
 }
 
 OPENAI_COMPAT_MODELS: dict[str, tuple[str, str]] = {
-    "groq": (URLS["groq_chat"], "llama-3.3-70b-versatile"),
+    "groq": (URLS["groq_chat"], "llama-3.1-8b-instant"),
     "samba": (URLS["samba"], "Meta-Llama-3.3-70B-Instruct"),
-    "openrouter": (URLS["openrouter"], "meta-llama/llama-3.3-70b-instruct:free"),
+    "openrouter": (URLS["openrouter"], "openrouter/free"),
 }
 
 
@@ -85,7 +85,7 @@ def _ask_gemini(key: str, prompt: str, system: str, temp: float) -> Optional[str
         "contents": [{"parts": [{"text": full_text}]}],
         "generationConfig": {"temperature": temp, "maxOutputTokens": 2048},
     }
-    for model in ("gemini-2.0-flash", "gemini-1.5-flash"):
+    for model in ("gemini-2.5-flash", "gemini-2.5-flash-lite"):
         url = f"{URLS['gemini']}{model}:generateContent?key={key}"
         res = SESSION.post(url, json=payload, timeout=DEFAULT_TIMEOUT)
         if res.status_code == 200:
@@ -107,8 +107,6 @@ def _ask_cohere(key: str, prompt: str, system: str, temp: float) -> Optional[str
         return res.json()["message"]["content"][0]["text"].strip()
     print(f"API Err [cohere]: {res.status_code} - {res.text[:120]}", flush=True)
     return None
-
-
 def _ask_cloudflare(prompt: str, system: str, temp: float) -> Optional[str]:
     if not CF_ACCOUNT or not CF_TOKEN:
         return None
@@ -119,6 +117,8 @@ def _ask_cloudflare(prompt: str, system: str, temp: float) -> Optional[str]:
         return res.json().get("result", {}).get("response", "").strip()
     print(f"API Err [cloudflare]: {res.status_code} - {res.text[:120]}", flush=True)
     return None
+
+
 def ai_ask(
     prompt: str,
     system: str = "",
@@ -156,7 +156,7 @@ def ai_ask(
         "cloudflare": lambda _: _ask_cloudflare(prompt, system, temperature),
     }
 
-    answer = FAILOVER.execute_chain(providers, lambda prov: handlers[prov[0]](prov[1]))
+    answer = FAILOVER.execute_chain(providers, lambda prov: handlers[prov](prov))
     latency_ms = round((time.time() - t0) * 1000, 1)
 
     if answer:

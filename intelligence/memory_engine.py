@@ -1,7 +1,9 @@
 import math
 import re
+import threading
 from collections import Counter
-from typing import List, Dict
+from typing import Any
+
 from core.core_ai import sb
 
 
@@ -24,15 +26,16 @@ def _cosine_sim(c1: Counter, c2: Counter) -> float:
     return dot / (norm1 * norm2)
 
 
-def hybrid_rank_memories(query: str, records: List[Dict], top_k: int = 5) -> List[str]:
-    """بحث هجين يجمع بين التطابق اللفظي (Lexical) والتشابه الدلالي (Semantic N-gram Cosine)."""
+def hybrid_rank_memories(query: str, records: list[dict[str, Any]], top_k: int = 5) -> list[str]:
     if not records:
         return []
     q_words = set(re.findall(r"[\w\u0600-\u06FF]+", query.lower()))
     q_vec = _ngrams(query)
 
-    scored = []
+    scored: list[tuple[float, str]] = []
     for rec in records:
+        if not isinstance(rec, dict):
+            continue
         txt = str(rec.get("lesson_learned", "")).strip()
         if not txt or txt.startswith("{"):
             continue
@@ -47,33 +50,44 @@ def hybrid_rank_memories(query: str, records: List[Dict], top_k: int = 5) -> Lis
 
 
 def get_context(cid: str, query: str = "") -> str:
-    """استرجاع القواعد الدائمة + السياق الدلالي المرتبط بالطلب الحالي."""
+    mem_key = f"mem:{cid}"
     rules = sb("GET", "self_learning_logs", q="?user_role=eq.admin&is_active=eq.true&order=id.desc&limit=10")
-    hist = sb("GET", "self_learning_logs", q=f"?user_role=eq.{cid}&order=id.desc&limit=15")
+    hist = sb("GET", "self_learning_logs", q=f"?user_role=eq.{mem_key}&order=id.desc&limit=15")
 
-    lines = []
-    if rules:
-        active_rules = [r["lesson_learned"] for r in rules if r.get("lesson_learned") and not r["lesson_learned"].startswith("{")][:5]
+    lines: list[str] = []
+    if rules and isinstance(rules, list):
+        active_rules = [
+            r["lesson_learned"]
+            for r in rules
+            if isinstance(r, dict) and r.get("lesson_learned") and not str(r["lesson_learned"]).startswith("{")
+        ][:5]
         if active_rules:
             lines.append("📌 قواعد وتوجيهات دائمة من المشرف:\n- " + "\n- ".join(active_rules))
 
-    if hist:
+    if hist and isinstance(hist, list):
         if query:
             relevant = hybrid_rank_memories(query, hist, top_k=4)
         else:
-            relevant = [h["lesson_learned"] for h in hist if h.get("lesson_learned") and not h["lesson_learned"].startswith("{")][:4]
+            relevant = [
+                h["lesson_learned"]
+                for h in hist
+                if isinstance(h, dict) and h.get("lesson_learned") and not str(h["lesson_learned"]).startswith("{")
+            ][:4]
         if relevant:
             lines.append("🧠 سياق المحادثات والذاكرة الدلالية السابقة:\n- " + "\n- ".join(relevant))
 
     return "\n\n".join(lines)
 
 
-def save_memory(cid: str, role: str, sname: str, user_msg: str, ai_reply: str):
-    """حفظ ملخص التفاعل في الذاكرة السحابية مع عزل بيانات كل مستفيد."""
+def save_memory(cid: str, role: str, sname: str, user_msg: str, ai_reply: str) -> None:
     summary = f"[{sname}]: {user_msg[:140]} => {ai_reply[:180]}"
-    sb("POST", "self_learning_logs", {
-        "user_role": cid,
-        "task_type": role,
-        "lesson_learned": summary,
-        "is_active": True,
-    })
+    threading.Thread(
+        target=sb,
+        args=("POST", "self_learning_logs", {
+            "user_role": f"mem:{cid}",
+            "task_type": role,
+            "lesson_learned": summary,
+            "is_active": True,
+        }),
+        daemon=True,
+    ).start()

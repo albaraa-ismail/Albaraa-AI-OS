@@ -35,7 +35,7 @@ EXECUTOR = ThreadPoolExecutor(max_workers=6)
 SEEN: set[str] = set()
 LAST_TASK: dict[str, str] = {}
 
-TW_CDN = "https://tailwindcss.com"
+TW_CDN = "https://cdn.tailwindcss.com"
 CH_CDN = "https://jsdelivr.net"
 GF_CDN = "https://googleapis.com"
 
@@ -57,13 +57,16 @@ def _get_record(record_id: int) -> Optional[dict[str, Any]]:
     res = sb("GET", "self_learning_logs", q=f"?id=eq.{record_id}")
     if not res:
         return None
-    return res if isinstance(res, list) else res
+    rec = res if isinstance(res, list) else res
+    return rec if isinstance(rec, dict) else None
 
 
 def _handle_board_post(board: dict[str, Any], cols: list[str], rows: list[list[Any]]) -> tuple[list[str], list[list[Any]], str]:
-    """معالجة عمليات الإضافة والتعديل والحذف والتحديث الذكي على جدول اللوحة."""
     act = request.form.get("action")
-    idx = int(request.form.get("idx", -1))
+    try:
+        idx = int(request.form.get("idx", -1))
+    except ValueError:
+        idx = -1
 
     if act == "add":
         rows.append([request.form.get(f"c{i}", "").strip() for i in range(len(cols))])
@@ -87,10 +90,7 @@ def _handle_board_post(board: dict[str, Any], cols: list[str], rows: list[list[A
             return ai_data.get("cols", cols), ai_data["rows"], f"✅ {ai_data.get('reply', 'تم تحديث البيانات بنجاح.')}"
         return cols, rows, "⚠️ تعذر معالجة التعديل حالياً، يرجى المحاولة مرة أخرى."
     return cols, rows, ""
-
-
 def _extract_chart_metrics(rows: list[list[Any]]) -> tuple[list[str], list[float], float, float]:
-    """استخراج التسميات والقيم الرقمية للرسم البياني ومؤشرات الأداء."""
     labels = [str(r) for r in rows[:12] if r]
     values: list[float] = []
     for r in rows[:12]:
@@ -107,6 +107,8 @@ def _extract_chart_metrics(rows: list[list[Any]]) -> tuple[list[str], list[float
     avg_val = round(sum(values) / len(values), 1) if values else 0.0
     max_val = max(values) if values else 0.0
     return labels, values, avg_val, max_val
+
+
 @app.route("/board/<int:bid>", methods=["GET", "POST"])
 def live_board(bid: int):
     record = _get_record(bid)
@@ -162,7 +164,7 @@ def live_board(bid: int):
       </div>
       <div class='bg-gradient-to-l from-slate-900 to-indigo-950/40 border border-indigo-500/30 p-5 rounded-2xl mb-6 shadow-lg'>
         <form method='POST' class='flex flex-col md:flex-row gap-3'>
-          <input name='q' placeholder='اكتب التعديل المطلوب على الجدول (مثال: أضف 5 موظفين جدد لقسم التقنية أو عدّل إنجاز أحمد إلى 98%)...' class='flex-1 bg-slate-950/80 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-sky-500' required>
+          <input name='q' placeholder='اكتب التعديل المطلوب على الجدول (مثال: أضف 5 موظفين جدد لقسم التقنية أو عدل إنجاز أحمد إلى 98%)...' class='flex-1 bg-slate-950/80 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-sky-500' required>
           <button name='action' value='chat' class='bg-sky-600 hover:bg-sky-500 text-white font-bold px-6 py-3 rounded-xl text-sm transition'>⚡ تطبيق التعديل</button>
         </form>{reply_banner}
       </div>
@@ -172,7 +174,7 @@ def live_board(bid: int):
         <table class='w-full text-right border-collapse'><thead><tr class='bg-slate-950 text-slate-300 text-xs uppercase'>{headers_html}<th class='p-3 border-b border-slate-800'>تحكم</th></tr></thead><tbody>{rows_html}</tbody></table>
       </div>
       <script>
-        document.addEventListener('keydown', e => {{ if (e.ctrlKey && ['c','u','s','p'].includes(e.key)) e.preventDefault(); }});
+        document.addEventListener('keydown', e => {{ if (e.ctrlKey && ) e.preventDefault(); }});
         new Chart(document.getElementById('kpiChart'), {{
           type: 'bar',
           data: {{ labels: {json.dumps(labels, ensure_ascii=False)}, datasets: [{{ label: 'القيمة / المؤشر', data: {json.dumps(values)}, backgroundColor: 'rgba(56,189,248,0.75)', borderColor: '#38bdf8', borderWidth: 1, borderRadius: 6 }}] }},
@@ -198,6 +200,8 @@ def export_board(bid: int):
     wb.save(buf)
     buf.seek(0)
     return send_file(buf, as_attachment=True, download_name=f"Dashboard_{bid}.xlsx")
+
+
 @app.route("/site/<int:sid>", methods=["GET", "POST"])
 def live_site(sid: int):
     record = _get_record(sid)
@@ -222,7 +226,7 @@ def live_site(sid: int):
         "background:rgba(15,23,42,0.95);border:1px solid #334155;padding:10px 14px;border-radius:14px;display:flex;gap:8px;align-items:center;"
         "box-shadow:0 10px 25px rgba(0,0,0,0.4);font-family:sans-serif;'>"
         "<form method='POST' style='display:flex;gap:8px;width:100%;margin:0;'>"
-        "<input name='edit_req' placeholder='اكتب أي تعديل على تصميم الموقع أو ألوانه ومحتواه ليتم تطبيقه فوراً...' "
+        "<input name='edit_req' placeholder='اكتب أي تعديل على تصميم الموقع أو ألوانه ومحتواه ليتم تطبيقه فورا...' "
         "style='flex:1;padding:8px 12px;border-radius:8px;border:1px solid #475569;background:#020617;color:#fff;font-size:13px;' required>"
         "<button type='submit' style='background:#0284c7;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-weight:bold;cursor:pointer;font-size:13px;'>تحديث الصفحة</button>"
         "<button type='button' onclick=\"document.getElementById('live-editor-bar').style.display='none'\" "
@@ -281,7 +285,7 @@ def api_web_chat():
     uid = str(body.get("user_id", "web_guest")).strip()
     if not msg:
         return jsonify({"error": "empty_message"}), 400
-    return jsonify({"reply": run_task(f"web_{uid}", msg, "trainee", uid)}), 200
+    return jsonify({"reply": run_task(f"web_{uid}", msg, "trainee", uid, notify_whatsapp=False)}), 200
 
 
 @app.route("/api/robotics", methods=["POST"])
@@ -296,8 +300,6 @@ def api_robotics():
 @app.route("/", methods=["GET"])
 def home():
     return "System Online", 200
-
-
 HELP_MENU = (
     "📌 *الخدمات والقدرات المتكاملة (58 قدرة تنفيذية وحاكمة):*\n\n"
     "1️⃣ *مستندات Word وبحوث أكاديمية:* اكتب (تقرير وورد عن... أو بحث علمي عن...)\n"
@@ -316,6 +318,8 @@ HELP_MENU = (
     "• لتعديل آخر مخرج فوراً: اكتب *(تعديل: ملاحظتك هنا)*\n"
     "• لفحص وتطوير النظام: اكتب *(اقترح تطوير)*"
 )
+
+
 def _is_authorized(cid: str, sender: str) -> bool:
     if ALLOWED_GROUP and (cid == ALLOWED_GROUP or ALLOWED_GROUP in cid):
         return True
@@ -324,8 +328,11 @@ def _is_authorized(cid: str, sender: str) -> bool:
     sender_digits = "".join(filter(str.isdigit, sender.split("@"))) if sender else ""
     allowed_phones = {p for p in (ADMIN_PHONE, PARTNER_PHONE) if p}
 
-    if cid_digits in allowed_phones or sender_digits in allowed_phones:
-        return True
+    for p in allowed_phones:
+        if cid_digits == p or sender_digits == p:
+            return True
+        if len(p) >= 9 and (cid_digits.endswith(p[-9:]) or sender_digits.endswith(p[-9:])):
+            return True
 
     try:
         return bool(IAM_GATEWAY.resolve_session(cid, sender=sender).get("authorized"))
@@ -339,7 +346,6 @@ def _run_with_tip(fn, cid: str, task: str) -> None:
 
 
 def _handle_admin_commands(cid: str, clean: str) -> bool:
-    """معالجة أوامر التطوير الذاتي الخاصة بالمشرف."""
     if clean.startswith("اقترح تطوير"):
         topic = clean.replace("اقترح تطوير", "").strip() or "تحسين الأداء وإضافة ميزة جديدة"
         send_msg(cid, "🔬 جاري البحث وتحليل السجلات لاقتراح تطوير برمجي آمن ومفحوص...")
@@ -367,7 +373,11 @@ def _handle_admin_commands(cid: str, clean: str) -> bool:
 def _dispatch_smart(cid: str, txt: str, sname: str) -> None:
     clean = txt.strip()
     user_tag = sname.strip() if sname and sname.strip() != "User" else "admin"
-    is_admin = bool(ADMIN_PHONE and ADMIN_PHONE in "".join(filter(str.isdigit, cid)))
+    cid_digits = "".join(filter(str.isdigit, cid.split("@")))
+    is_admin = bool(
+        ADMIN_PHONE
+        and (cid_digits == ADMIN_PHONE or (len(ADMIN_PHONE) >= 9 and cid_digits.endswith(ADMIN_PHONE[-9:])))
+    )
 
     if any(k in clean for k in ("القائمة", "المساعدة", "الخدمات", "/help", "قدراتك", "ايش تقدر تسوي", "وش تقدر تسوي")):
         send_msg(cid, HELP_MENU)
@@ -382,7 +392,7 @@ def _dispatch_smart(cid: str, txt: str, sname: str) -> None:
 
     for prefix in ("تعديل:", "ملاحظة:", "قاعدة:", "تغذية راجعة:"):
         if clean.startswith(prefix):
-            note = clean[len(prefix):].strip()
+            note = clean[len(prefix) :].strip()
             if not note:
                 send_msg(cid, "⚠️ اكتب ملاحظتك بعد الكلمة المفتاحية، مثال:\n`تعديل: اجعل التقرير مختصراً مع إضافة أمثلة واقعية`")
                 return
@@ -438,9 +448,9 @@ def _build_live_site(cid: str, task: str) -> None:
     send_msg(cid, "🌐 جاري تصميم وبرمجة الموقع وتجهيز رابط المعاينة والتعديل المباشر...")
     prompt = (
         f"صمم موقع ويب متكامل وعصري باللغة العربية (RTL) حول: {task}\n"
-        "استخدم Tailwind CSS عبر CDN وخط Cairo من Google Fonts، واجعل التصميم احترافياً متجاوباً مع الجوال والحاسوب "
+        "استخدم Tailwind CSS عبر CDN وخط Cairo من Google Fonts، واجعل التصميم احترافيا متجاوبا مع الجوال والحاسوب "
         "مع أقسام متكاملة وأزرار تفاعلية وصور عالية الدقة من Unsplash أو LoremFlickr.\n"
-        "أرجع كود HTML الكامل فقط بدءاً من <!DOCTYPE html> وحتى </html> بدون أي مقدمات أو علامات markdown."
+        "أرجع كود HTML الكامل فقط بدءا من <!DOCTYPE html> وحتى </html> بدون أي مقدمات أو علامات markdown."
     )
     clean_html = ai_ask(task, prompt, mode="general", use_cache=False).replace("```html", "").replace("```", "").strip()
     if "<html" not in clean_html.lower():
@@ -450,12 +460,12 @@ def _build_live_site(cid: str, task: str) -> None:
     saved = sb("POST", "self_learning_logs", {"user_role": "live_site", "lesson_learned": clean_html, "is_active": True})
     sid = saved.get("id", 1) if isinstance(saved, list) and saved else 1
     site_link = f"{RENDER_URL}/site/{sid}" if RENDER_URL else f"/site/{sid}"
-    send_msg(cid, f"🌐 *تم تصميم وإطلاق الموقع بنجاح!*\n\n🔗 *رابط الموقع المباشر (مع أداة التعديل الفوري أسفل الصفحة):*\n{site_link}\n\n💡 يمكنك أيضاً كتابة `تعديل: [وصف التعديل]` هنا في المحادثة لإعادة بنائه.")
+    send_msg(cid, f"🌐 *تم تصميم وإطلاق الموقع بنجاح!*\n\n🔗 *رابط الموقع المباشر (مع أداة التعديل الفوري أسفل الصفحة):*\n{site_link}\n\n💡 يمكنك أيضا كتابة `تعديل: [وصف التعديل]` هنا في المحادثة لإعادة بنائه.")
 
 
 def _push_to_github(cid: str, task: str) -> None:
     if not GITHUB_TOKEN:
-        send_msg(cid, "⚠️ للرفع التلقائي على GitHub، أضف متغير `GITHUB_TOKEN` في إعدادات Render أولاً، أو اطلب الكود وسأجهزه لك مباشرة.")
+        send_msg(cid, "⚠️ للرفع التلقائي على GitHub، أضف متغير `GITHUB_TOKEN` في إعدادات Render أولا، أو اطلب الكود وسأجهزه لك مباشرة.")
         return
 
     send_msg(cid, "📦 جاري تجهيز الملفات البرمجية ورفعها إلى حسابك في GitHub...")
@@ -472,6 +482,8 @@ def _push_to_github(cid: str, task: str) -> None:
     b64_code = base64.b64encode(code_content.encode("utf-8")).decode("utf-8")
     requests.put(f"{GITHUB_API}/repos/{full_name}/contents/index.html", headers=headers, json={"message": "Initial commit", "content": b64_code}, timeout=15)
     send_msg(cid, f"✅ *تم إنشاء المستودع ورفع المشروع على GitHub بنجاح:*\n{html_url}")
+
+
 BOT_PREFIXES = (
     "🔍", "⚙️", "🛡️", "📑", "🌐", "🚀", "💻", "⚠", "✅", "🤖", "📊", "📄", "📽️",
     "👥", "💡", "🧠", "🎙", "📚", "🔄", "📌", "📦", "🛍️", "🏗️", "⚖️", "🧾", "🔬", "❌", "↩️",
@@ -486,7 +498,6 @@ def _handle_media_message(cid: str, mdata: dict[str, Any], sname: str) -> None:
     dl_url = file_data.get("downloadUrl", "")
     if not dl_url:
         return
-
     mime = file_data.get("mimeType", "")
     caption = file_data.get("caption", "").strip()
 
@@ -519,24 +530,22 @@ def webhook():
     if _mark_seen(data.get("idMessage", "")):
         return jsonify({"status": "dup"}), 200
 
-    sdata = data.get("senderData", {})
+    sdata = data.get("senderData") or {}
     cid, sender = sdata.get("chatId", ""), sdata.get("sender", "")
     if not _is_authorized(cid, sender):
         print(f"BLOCKED: type={wtype} | cid={cid} | sender={sender}", flush=True)
         return jsonify({"status": "unauthorized"}), 200
 
-    mdata = data.get("messageData", {})
+    mdata = data.get("messageData") or {}
     sname = sdata.get("senderName", "User")
 
     if mdata.get("typeMessage") in MEDIA_TYPES:
         EXECUTOR.submit(safe_run, _handle_media_message, cid, mdata, sname)
         return jsonify({"status": "media_queued"}), 200
 
-    txt = (
-        mdata.get("textMessageData", {}).get("textMessage")
-        or mdata.get("extendedTextMessageData", {}).get("text")
-        or ""
-    ).strip()
+    txt_data = mdata.get("textMessageData") or {}
+    ext_data = mdata.get("extendedTextMessageData") or {}
+    txt = str(txt_data.get("textMessage") or ext_data.get("text") or "").strip()
 
     if txt and cid and not txt.startswith(BOT_PREFIXES):
         sec_check = inspect_prompt_injection(txt, cid)

@@ -1,4 +1,3 @@
-# === 1. الخادم والشبكة والبيانات (Server & Core) ===#
 flask
 gunicorn
 requests
@@ -6,19 +5,17 @@ httpx
 orjson
 cachetools
 pydantic
-
-# === 2. الذكاء الاصطناعي والبحث الحي (AI & Search) ===#
+google-genai
+groq
+openai
+supabase
 ddgs
 beautifulsoup4
 lxml
 tenacity
-
-# === 3. الأمن السيبراني والتعقيم والتشفير (Cybersecurity & Vault) ===#
 cryptography
 pyjwt
 bleach
-
-# === 4. الصوت السعودي، PDF، والوسائط (Voice, PDF & Office) ===#
 edge-tts
 pillow
 pypdf
@@ -29,8 +26,6 @@ python-pptx
 reportlab
 qrcode
 markdown
-
-# === 5. علم البيانات، التنبؤ، والرسوم البيانية (Data Science & ML) ===#
 numpy
 pandas
 scipy
@@ -38,8 +33,6 @@ scikit-learn
 matplotlib
 seaborn
 plotly
-
-# === 6. معالجة اللغة العربية والتقويم الهجري والمواقع (Arabic NLP & Geo) ===#
 arabic-reshaper
 python-bidi
 pendulum

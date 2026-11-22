@@ -14,7 +14,6 @@ from telemetry.evolution_engine import analyze_system_evolution, check_due_remin
 
 
 def _validate_python_syntax(code_str: str) -> tuple[bool, str]:
-    """فحص سلامة الصياغة البرمجية للكود المقترح عبر شجرة AST."""
     try:
         ast.parse(code_str)
         return True, "تم اجتياز فحص القواعد البرمجية (AST) بنجاح 100%"
@@ -31,6 +30,8 @@ def _load_proposal(pid: int) -> Optional[dict[str, Any]]:
     if not res:
         return None
     rec = res if isinstance(res, list) else res
+    if not isinstance(rec, dict):
+        return None
     try:
         return json.loads(rec.get("lesson_learned", "{}"))
     except json.JSONDecodeError:
@@ -38,7 +39,6 @@ def _load_proposal(pid: int) -> Optional[dict[str, Any]]:
 
 
 def _get_github_file(target_file: str) -> tuple[str, Optional[str]]:
-    """جلب محتوى ملف من GitHub مع رمز SHA الخاص به."""
     url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{target_file}"
     res = requests.get(url, headers=_gh_headers(), timeout=15)
     if res.status_code == 200:
@@ -49,7 +49,6 @@ def _get_github_file(target_file: str) -> tuple[str, Optional[str]]:
 
 
 def _push_github_file(target_file: str, content_str: str, commit_msg: str, sha: Optional[str] = None) -> int:
-    """رفع أو تحديث ملف في مستودع GitHub."""
     url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{target_file}"
     b64_data = base64.b64encode(content_str.encode("utf-8")).decode("utf-8")
     payload: dict[str, Any] = {"message": commit_msg, "content": b64_data}
@@ -60,7 +59,6 @@ def _push_github_file(target_file: str, content_str: str, commit_msg: str, sha: 
 
 
 def propose_safe_upgrade(topic: str = "تحسين سرعة الاستجابة وجودة المخرجات") -> None:
-    """توليد مقترح تطوير برمجي آمن وفحصه قبل إرساله للمدير."""
     if not ADMIN_PHONE:
         return
 
@@ -69,14 +67,13 @@ def propose_safe_upgrade(topic: str = "تحسين سرعة الاستجابة و
     recent_notes = "\n".join(str(x.get("lesson_learned", ""))[:120] for x in logs if isinstance(x, dict))
 
     prompt = (
-        f"بناءً على سجل التفاعل والملاحظات الأخيرة:\n{recent_notes}\n\n"
+        f"بناء على سجل التفاعل والملاحظات الأخيرة:\n{recent_notes}\n\n"
         f"مجال التحسين المستهدف: {topic}\n"
         "اقترح إضافة برمجية مستقلة آمنة (دالة بايثون مساعدة جديدة) يمكن إضافتها دون تعديل أو حذف أي دالة قائمة.\n"
-        "أرجع JSON فقط بهذا الهيكل الدقيق:\n"
-        '{"title": "عنوان التطوير", "target_file": "multimodal/pro_capabilities.py", "risk_level": "منخفض جداً (دالة مستقلة)", '
-        '"new_libs": "لا يوجد", "summary": "شرح تفصيلي للفائدة والتغيير", "code": "كود بايثون صالح للتنفيذ المباشر"}'
+        'أرجع JSON فقط بهذا الهيكل الدقيق: {"title": "عنوان التطوير", "target_file": "multimodal/pro_capabilities.py", '
+        '"risk_level": "منخفض جدا", "new_libs": "لا يوجد", "summary": "شرح الفائدة والتغيير", "code": "كود بايثون صالح"}'
     )
-    proposal = ai_ask_json(prompt, "أنت مهندس برمجيات خبير في بايثون. اكتب كوداً نظيفاً وآمناً ومختبراً.", mode="general")
+    proposal = ai_ask_json(prompt, "أنت مهندس برمجيات خبير في بايثون. اكتب كودا نظيفا وآمنا.", mode="general")
     if not isinstance(proposal, dict) or not proposal.get("code"):
         return
 
@@ -93,7 +90,7 @@ def propose_safe_upgrade(topic: str = "تحسين سرعة الاستجابة و
         "lesson_learned": json.dumps(proposal, ensure_ascii=False),
         "is_active": True,
     })
-    pid = saved.get("id", 0) if isinstance(saved, list) and saved else 0
+    pid = saved[0].get("id", 0) if isinstance(saved, list) and saved else 0
     if not pid:
         return
 
@@ -113,7 +110,6 @@ def propose_safe_upgrade(topic: str = "تحسين سرعة الاستجابة و
 
 
 def get_proposal_code(pid: int) -> str:
-    """عرض الكود البرمجي الكامل لمقترح التطوير قبل الاعتماد."""
     prop = _load_proposal(pid)
     if not prop:
         return "⚠️ لم يتم العثور على مقترح التطوير المطلوب."
@@ -126,7 +122,6 @@ def get_proposal_code(pid: int) -> str:
 
 
 def approve_and_deploy_upgrade(pid: int) -> str:
-    """اعتماد المقترح، أخذ نسخة احتياطية، ودمجه في المستودع."""
     if not GITHUB_TOKEN:
         return "⚠️ للتثبيت المباشر على GitHub، تأكد من إضافة `GITHUB_TOKEN` في إعدادات Render."
     prop = _load_proposal(pid)
@@ -141,7 +136,9 @@ def approve_and_deploy_upgrade(pid: int) -> str:
         sb("PATCH", "self_learning_logs", {"lesson_learned": json.dumps(prop, ensure_ascii=False)}, q=f"?id=eq.{pid}")
 
         merged = f"{old_content}\n\n# --- Auto-Approved Upgrade #{pid} ---\n{prop.get('code', '')}\n"
-        status = _push_github_file(target_file, merged, f"Approved Evolution Upgrade #{pid}: {prop.get('title', '')}", sha)
+        status = _push_github_file(
+            target_file, merged, f"Approved Evolution Upgrade #{pid}: {prop.get('title', '')}", sha
+        )
         if status in (200, 201):
             return (
                 f"✅ *تم اعتماد وتثبيت التطوير رقم {pid} بنجاح!*\n"
@@ -152,10 +149,10 @@ def approve_and_deploy_upgrade(pid: int) -> str:
         return f"⚠️ تعذر التحديث على GitHub (رمز الحالة: {status})."
     except Exception as exc:
         return f"⚠️ حدث خطأ أثناء التثبيت: {exc}"
+_SCHEDULER_STARTED = False
 
 
 def rollback_upgrade(pid: int) -> str:
-    """التراجع الفوري واستعادة النسخة الاحتياطية للملف."""
     if not GITHUB_TOKEN:
         return "⚠️ متغير `GITHUB_TOKEN` غير مضبوط في Render."
     prop = _load_proposal(pid)
@@ -175,7 +172,6 @@ def rollback_upgrade(pid: int) -> str:
 
 
 def _scheduler_loop() -> None:
-    """حلقة المراقبة الدورية للتذكيرات والتقارير اليومية."""
     admin_cid = f"{ADMIN_PHONE}@c.us" if ADMIN_PHONE else ""
     last_daily_report = ""
 
@@ -189,7 +185,7 @@ def _scheduler_loop() -> None:
                     BUS.publish("scheduler.reminder_sent", {"cid": target})
 
             today_key = now.strftime("%Y-%m-%d")
-            if now.hour == 9 and now.minute == 0 and last_daily_report != today_key:
+            if now.hour == 9 and now.minute < 5 and last_daily_report != today_key:
                 last_daily_report = today_key
                 report = analyze_system_evolution()
                 if admin_cid and report:
@@ -202,7 +198,11 @@ def _scheduler_loop() -> None:
         time.sleep(55)
 
 
-def start_scheduler() -> threading.Thread:
+def start_scheduler() -> Optional[threading.Thread]:
+    global _SCHEDULER_STARTED
+    if _SCHEDULER_STARTED:
+        return None
+    _SCHEDULER_STARTED = True
     thread = threading.Thread(target=_scheduler_loop, daemon=True)
     thread.start()
     BUS.publish("scheduler.started", {"status": "active"})

@@ -156,7 +156,7 @@ def ai_ask(
         "cloudflare": lambda _: _ask_cloudflare(prompt, system, temperature),
     }
 
-    answer = FAILOVER.execute_chain(providers, lambda prov: handlers[prov[0]](prov[1])
+    answer = FAILOVER.execute_chain(providers, lambda prov: handlers[prov[0]](prov[1]))
     latency_ms = round((time.time() - t0) * 1000, 1)
 
     if answer:

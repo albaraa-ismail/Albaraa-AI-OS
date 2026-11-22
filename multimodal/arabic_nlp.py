@@ -1,6 +1,6 @@
 import re
 
-DIALECT_MAP = {
+DIALECT_MAP: dict[str, str] = {
     "ابغاء": "أريد",
     "ابغا": "أريد",
     "ابغى": "أريد",
@@ -22,37 +22,27 @@ DIALECT_MAP = {
     "تمام": "موافق",
 }
 
+_DIALECT_RE = re.compile(
+    r"(?<!\w)(" + "|".join(re.escape(k) for k in sorted(DIALECT_MAP, key=len, reverse=True)) + r")(?!\w)"
+)
+
+_ROBOTIC_OPENERS_RE = re.compile(
+    r"^(?:بصفتي نموذج ذكاء اصطناعي|بصفتي ذكاءً اصطناعياً|بالتأكيد[!،]?\s*إليك|بالطبع[،!]?\s*يسعدني مساعدتك في|As an AI language model)[،:!.\-\s]*",
+    re.IGNORECASE,
+)
+
 
 def normalize_arabic_dialect(text: str) -> str:
-    """تطبيع اللهجة السعودية/العامية وتصحيح الهمزات الشائعة لتعزيز دقة الفهم."""
+    """تطبيع اللهجة السعودية/العامية لتعزيز دقة الفهم مع الحفاظ على علامات الترقيم."""
     if not text:
         return text
-    cleaned = re.sub(r"\s+", " ", text).strip()
-    words = cleaned.split(" ")
-    normalized = []
-    for w in words:
-        stripped = w.strip("؟?!.,،:")
-        if stripped in DIALECT_MAP:
-            normalized.append(w.replace(stripped, DIALECT_MAP[stripped]))
-        else:
-            normalized.append(w)
-    return " ".join(normalized)
+    cleaned = re.sub(r"[ \t]+", " ", text).strip()
+    return _DIALECT_RE.sub(lambda m: DIALECT_MAP[m.group(0)], cleaned)
 
 
 def polish_human_style(text: str) -> str:
     """تحسين الصياغة البشرية وإزالة العبارات الآلية المكررة والحشو."""
     if not text:
         return text
-    robotic_openers = [
-        "بصفتي نموذج ذكاء اصطناعي،",
-        "بصفتي ذكاءً اصطناعياً،",
-        "بالتأكيد! إليك",
-        "بالطبع، يسعدني مساعدتك في",
-        "As an AI language model,",
-    ]
-    out = text.strip()
-    for opener in robotic_openers:
-        if out.startswith(opener):
-            out = out[len(opener):].strip()
-    out = re.sub(r"\n{3,}", "\n\n", out)
-    return out
+    out = _ROBOTIC_OPENERS_RE.sub("", text.strip()).strip()
+    return re.sub(r"\n{3,}", "\n\n", out)

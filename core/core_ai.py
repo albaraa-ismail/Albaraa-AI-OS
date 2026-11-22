@@ -27,7 +27,7 @@ MODE_ROUTING: dict[str, list[str]] = {
 }
 
 OPENAI_COMPAT_MODELS: dict[str, tuple[str, str]] = {
-    "groq": (URLS["groq_chat"], "llama-3.1-8b-instant"),
+        "groq": (URLS["groq_chat"], "openai/gpt-oss-120b"),
     "samba": (URLS["samba"], "Meta-Llama-3.3-70B-Instruct"),
     "openrouter": (URLS["openrouter"], "openrouter/free"),
 }

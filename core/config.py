@@ -38,7 +38,7 @@ ALLOWED_GROUP = _env("ALLOWED_GROUP")
 RENDER_URL = _env("RENDER_EXTERNAL_URL").rstrip("/")
 GITHUB_TOKEN = _env("GITHUB_TOKEN")
 GITHUB_REPO = _env("GITHUB_REPO", "albaraa-ismail/Albaraa-AI-OS")
-GITHUB_API = "https://api.github.com"
+GITHUB_API = "https://github.com"
 
 SB_URL = _env("SUPABASE_URL").rstrip("/")
 SB_KEY = _env("SUPABASE_KEY")

@@ -38,9 +38,7 @@ LAST_TASK: dict[str, str] = {}
 TW_CDN = "https://tailwindcss.com"
 CH_CDN = "https://jsdelivr.net"
 GF_CDN = "https://googleapis.com"
-
 start_scheduler()
-
 
 def _mark_seen(mid: str) -> bool:
     if not mid:

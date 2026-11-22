@@ -1,32 +1,44 @@
-import os
 import base64
-from core.core_ai import GEM_KEYS, GEMINI_BASE_URL, SESSION
+import os
+
+from core.config import GEM_KEYS, URLS, rotated_keys
+from core.core_ai import SESSION
+from security.safe_guard import mask_saudi_pii
+
+TEXT_EXTENSIONS = (".pdf", ".docx", ".doc", ".xlsx", ".xls", ".txt", ".csv")
 
 
 def extract_document_text(path: str) -> str:
-    """استخراج النصوص من ملفات PDF و Word و Excel بدقة عالية."""
+    """استخراج النصوص من الملفات المحلية (PDF, Word, Excel, Text) بدقة عالية."""
     if not os.path.exists(path):
         return ""
+
     ext = os.path.splitext(path)[1].lower()
     try:
         if ext == ".pdf":
             from pypdf import PdfReader
+
             reader = PdfReader(path)
             return "\n".join(page.extract_text() or "" for page in reader.pages[:15]).strip()
+
         if ext in (".docx", ".doc"):
             from docx import Document
+
             doc = Document(path)
             return "\n".join(p.text for p in doc.paragraphs if p.text.strip()).strip()
+
         if ext in (".xlsx", ".xls"):
             import openpyxl
+
             wb = openpyxl.load_workbook(path, data_only=True)
-            lines = []
-            for ws in wb.worksheets[:3]:
-                for row in ws.iter_rows(max_row=60, values_only=True):
-                    vals = [str(c) for c in row if c is not None]
-                    if vals:
-                        lines.append(" | ".join(vals))
+            lines = [
+                " | ".join(str(c) for c in row if c is not None)
+                for ws in wb.worksheets[:3]
+                for row in ws.iter_rows(max_row=60, values_only=True)
+                if any(c is not None for c in row)
+            ]
             return "\n".join(lines).strip()
+
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
             return f.read(12000)
     except Exception as exc:
@@ -35,14 +47,14 @@ def extract_document_text(path: str) -> str:
 
 
 def analyze_multimodal_file(path: str, mime_type: str = "image/jpeg", prompt: str = "") -> str:
-    """قراءة وتحليل الصور والوثائق عبر نماذج الرؤية الحاسوبية."""
+    """قراءة وتحليل الصور والوثائق المحلية عبر استخراج النصوص أو الرؤية الحاسوبية."""
     if not os.path.exists(path):
         return "⚠ الملف غير موجود على الخادم."
 
-    if any(path.lower().endswith(e) for e in (".pdf", ".docx", ".xlsx", ".txt", ".csv")):
-        text_content = extract_document_text(path)
-        if text_content:
-            return f"📄 *المحتوى المستخرج من الوثيقة:*\n{text_content[:4000]}"
+    if path.lower().endswith(TEXT_EXTENSIONS):
+        if text_content := extract_document_text(path):
+            safe_txt = mask_saudi_pii(text_content[:4000])
+            return f"📄 *المحتوى المستخرج من الوثيقة:*\n{safe_txt}"
 
     if not GEM_KEYS:
         return "⚠ مفاتيح محرك الرؤية غير مفعلة."
@@ -59,11 +71,15 @@ def analyze_multimodal_file(path: str, mime_type: str = "image/jpeg", prompt: st
             ]
         }]
     }
-    for key in GEM_KEYS:
+
+    for key in rotated_keys(GEM_KEYS):
         try:
-            r = SESSION.post(f"{GEMINI_BASE_URL}gemini-2.0-flash:generateContent?key={key}", json=payload, timeout=35)
-            if r.status_code == 200:
-                return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            url = f"{URLS['gemini']}gemini-2.0-flash:generateContent?key={key}"
+            res = SESSION.post(url, json=payload, timeout=35)
+            if res.status_code == 200:
+                answer = res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+                return mask_saudi_pii(answer)
         except Exception:
             continue
+
     return "⚠ تعذر تحليل الصورة حالياً."

@@ -2,22 +2,18 @@ import os
 import random
 from datetime import timedelta, timezone
 
-# توقيت الرياض الموحد للنظام
 RIYADH_TZ = timezone(timedelta(hours=3))
 
 
 def _env(key: str, default: str = "") -> str:
-    """قراءة وتنظيف متغير البيئة بأمان."""
     return os.environ.get(key, default).strip()
 
 
 def digits_only(val: str) -> str:
-    """استخراج الأرقام فقط من النصوص وأرقام الجوال."""
     return "".join(filter(str.isdigit, str(val or "")))
 
 
 def load_api_keys(prefix: str) -> list[str]:
-    """جلب مفاتيح API الأساسية والاحتياطية بدون تكرار."""
     keys: list[str] = []
     if base := _env(prefix):
         keys.append(base)
@@ -29,29 +25,24 @@ def load_api_keys(prefix: str) -> list[str]:
 
 
 def rotated_keys(keys: list[str]) -> list[str]:
-    """تدوير المفاتيح عشوائياً لتوزيع الضغط."""
     if len(keys) <= 1:
         return list(keys)
     idx = random.randint(0, len(keys) - 1)
     return keys[idx:] + keys[:idx]
 
 
-# --- أرقام الإدارة والصلاحيات ---
 ADMIN_PHONE = digits_only(_env("ADMIN_PHONE"))
 PARTNER_PHONE = digits_only(_env("AHMED_PHONE"))
 ALLOWED_GROUP = _env("ALLOWED_GROUP")
 
-# --- روابط وإعدادات السحابة والخدمات ---
 RENDER_URL = _env("RENDER_EXTERNAL_URL").rstrip("/")
 GITHUB_TOKEN = _env("GITHUB_TOKEN")
 GITHUB_REPO = _env("GITHUB_REPO", "albaraa-ismail/Albaraa-AI-OS")
 GITHUB_API = "https://api.github.com"
 
-# --- قاعدة البيانات Supabase ---
 SB_URL = _env("SUPABASE_URL").rstrip("/")
 SB_KEY = _env("SUPABASE_KEY")
 
-# --- بوابة واتساب Green API ---
 GREEN_ID = _env("GREEN_API_ID") or _env("GREEN_ID_INSTANCE")
 GREEN_TOKEN = _env("GREEN_API_TOKEN")
 _raw_green = _env("GREEN_API_URL").rstrip("/")
@@ -61,7 +52,6 @@ GREEN_BASE = (
     else "https://green-api.com"
 )
 
-# --- مفاتيح وروابط نماذج الذكاء الاصطناعي ---
 GEM_KEYS = load_api_keys("GEMINI_API_KEY")
 GROQ_KEYS = load_api_keys("GROQ_API_KEY")
 SAMBA_KEYS = load_api_keys("SAMBANOVA_API_KEY")

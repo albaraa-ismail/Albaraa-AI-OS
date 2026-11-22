@@ -15,15 +15,13 @@ from core.event_bus import BUS
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "Albaraa-AI-OS/3.0"})
 
-# متغيرات توافقية لباقي وحدات النظام
 GEMINI_BASE_URL = URLS["gemini"]
 GEM_KEY = GEM_KEYS[0] if GEM_KEYS else ""
 _rotated = rotated_keys
 
-# إعدادات النماذج ومسارات التوجيه
-DEFAULT_TIMEOUT = 22
+DEFAULT_TIMEOUT = 45
 MODE_ROUTING: dict[str, list[str]] = {
-    "arabic": ["gemini", "cohere", "groq", "samba", "cloudflare", "openrouter"],
+    "arabic": ["gemini", "groq", "samba", "cohere", "cloudflare", "openrouter"],
     "fast": ["groq", "samba", "cloudflare", "gemini", "openrouter"],
     "general": ["groq", "gemini", "samba", "cohere", "cloudflare", "openrouter"],
 }
@@ -36,7 +34,6 @@ OPENAI_COMPAT_MODELS: dict[str, tuple[str, str]] = {
 
 
 def sb(method: str, table: str, data: Any = None, q: str = "") -> Any:
-    """التعامل المباشر مع جداول Supabase."""
     method_upper = method.upper()
     fallback = [] if method_upper == "GET" else None
 
@@ -61,14 +58,12 @@ def sb(method: str, table: str, data: Any = None, q: str = "") -> Any:
 
 
 def _build_messages(prompt: str, system: str) -> list[dict[str, str]]:
-    """تجهيز قائمة الرسائل القياسية لنماذج المحادثة."""
     messages = [{"role": "system", "content": system}] if system else []
     messages.append({"role": "user", "content": prompt})
     return messages
 
 
 def _ask_openai_compat(provider: str, key: str, prompt: str, system: str, temp: float) -> Optional[str]:
-    """استدعاء المزودين المتوافقين مع واجهة OpenAI (Groq, SambaNova, OpenRouter)."""
     base_url, model = OPENAI_COMPAT_MODELS[provider]
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     payload = {
@@ -84,7 +79,6 @@ def _ask_openai_compat(provider: str, key: str, prompt: str, system: str, temp: 
 
 
 def _ask_gemini(key: str, prompt: str, system: str, temp: float) -> Optional[str]:
-    """استدعاء نماذج Google Gemini مع دعم التبديل الاحتياطي."""
     full_text = f"{system}\n\n{prompt}".strip() if system else prompt
     payload = {
         "contents": [{"parts": [{"text": full_text}]}],
@@ -99,12 +93,12 @@ def _ask_gemini(key: str, prompt: str, system: str, temp: float) -> Optional[str
 
 
 def _ask_cohere(key: str, prompt: str, system: str, temp: float) -> Optional[str]:
-    """استدعاء نموذج Cohere Command R+."""
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     payload = {
         "model": "command-r-plus-08-2024",
         "messages": _build_messages(prompt, system),
         "temperature": temp,
+        "max_tokens": 2048,
     }
     res = SESSION.post(URLS["cohere"], headers=headers, json=payload, timeout=DEFAULT_TIMEOUT)
     if res.status_code == 200:
@@ -113,7 +107,6 @@ def _ask_cohere(key: str, prompt: str, system: str, temp: float) -> Optional[str
 
 
 def _ask_cloudflare(prompt: str, system: str, temp: float) -> Optional[str]:
-    """استدعاء نماذج Cloudflare Workers AI."""
     if not CF_ACCOUNT or not CF_TOKEN:
         return None
     headers = {"Authorization": f"Bearer {CF_TOKEN}", "Content-Type": "application/json"}
@@ -122,8 +115,6 @@ def _ask_cloudflare(prompt: str, system: str, temp: float) -> Optional[str]:
     if res.status_code == 200:
         return res.json().get("result", {}).get("response", "").strip()
     return None
-
-
 def ai_ask(
     prompt: str,
     system: str = "",
@@ -131,7 +122,6 @@ def ai_ask(
     mode: str = "general",
     use_cache: bool = True,
 ) -> str:
-    """البوابة الموحدة للاستعلام من نماذج الذكاء الاصطناعي مع التخزين المؤقت والتعافي التلقائي."""
     t0 = time.time()
 
     if use_cache:
@@ -176,7 +166,6 @@ def ai_ask(
 
 
 def ai_ask_json(prompt: str, system: str = "", mode: str = "fast") -> Optional[dict[str, Any]]:
-    """طلب استجابة مهيكلة بصيغة JSON واستخراجها بأمان."""
     json_system = f"{system}\nأرجع النتيجة بصيغة JSON صالحة فقط بدون أي نص إضافي.".strip()
     raw = ai_ask(prompt, json_system, temperature=0.2, mode=mode, use_cache=False)
     clean = raw.replace("```json", "").replace("```", "").strip()
@@ -191,7 +180,6 @@ def ai_ask_json(prompt: str, system: str = "", mode: str = "fast") -> Optional[d
 
 
 def send_msg(cid: str, text: str) -> None:
-    """إرسال رسالة نصية عبر بوابة واتساب."""
     if not GREEN_ID or not GREEN_TOKEN or not cid or not text:
         print(f"[MSG -> {cid}]: {text[:120]}", flush=True)
         return
@@ -206,7 +194,6 @@ def send_msg(cid: str, text: str) -> None:
 
 
 def send_file(cid: str, file_path: str, file_name: str, mime_type: str = "", caption: str = "") -> None:
-    """رفع وإرسال ملف عبر بوابة واتساب."""
     if not GREEN_ID or not GREEN_TOKEN or not cid or not os.path.exists(file_path):
         return
 

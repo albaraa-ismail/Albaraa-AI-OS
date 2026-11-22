@@ -75,6 +75,7 @@ def _ask_openai_compat(provider: str, key: str, prompt: str, system: str, temp: 
     res = SESSION.post(base_url, headers=headers, json=payload, timeout=DEFAULT_TIMEOUT)
     if res.status_code == 200:
         return res.json()["choices"][0]["message"]["content"].strip()
+    print(f"API Err [{provider}]: {res.status_code} - {res.text[:120]}", flush=True)
     return None
 
 
@@ -89,6 +90,7 @@ def _ask_gemini(key: str, prompt: str, system: str, temp: float) -> Optional[str
         res = SESSION.post(url, json=payload, timeout=DEFAULT_TIMEOUT)
         if res.status_code == 200:
             return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        print(f"API Err [gemini:{model}]: {res.status_code} - {res.text[:120]}", flush=True)
     return None
 
 
@@ -103,6 +105,7 @@ def _ask_cohere(key: str, prompt: str, system: str, temp: float) -> Optional[str
     res = SESSION.post(URLS["cohere"], headers=headers, json=payload, timeout=DEFAULT_TIMEOUT)
     if res.status_code == 200:
         return res.json()["message"]["content"][0]["text"].strip()
+    print(f"API Err [cohere]: {res.status_code} - {res.text[:120]}", flush=True)
     return None
 
 
@@ -114,6 +117,7 @@ def _ask_cloudflare(prompt: str, system: str, temp: float) -> Optional[str]:
     res = SESSION.post(URLS["cloudflare"], headers=headers, json=payload, timeout=DEFAULT_TIMEOUT)
     if res.status_code == 200:
         return res.json().get("result", {}).get("response", "").strip()
+    print(f"API Err [cloudflare]: {res.status_code} - {res.text[:120]}", flush=True)
     return None
 def ai_ask(
     prompt: str,

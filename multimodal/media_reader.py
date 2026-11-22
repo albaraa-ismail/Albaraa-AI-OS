@@ -7,7 +7,6 @@ from security.safe_guard import mask_saudi_pii
 
 
 def transcribe_voice_note(file_url: str) -> str:
-    """تفريغ البصمة الصوتية إلى نص عربي عبر Groq Whisper."""
     if not file_url or not GROQ_KEYS:
         return ""
     try:
@@ -16,22 +15,24 @@ def transcribe_voice_note(file_url: str) -> str:
             return ""
         raw_audio = audio_res.content
         for key in rotated_keys(GROQ_KEYS):
-            res = SESSION.post(
-                URLS["groq_audio"],
-                headers={"Authorization": f"Bearer {key}"},
-                files={"file": ("voice.ogg", raw_audio, "audio/ogg")},
-                data={"model": "whisper-large-v3-turbo", "language": "ar"},
-                timeout=30,
-            )
-            if res.status_code == 200:
-                return res.json().get("text", "").strip()
+            try:
+                res = SESSION.post(
+                    URLS["groq_audio"],
+                    headers={"Authorization": f"Bearer {key}"},
+                    files={"file": ("voice.ogg", raw_audio, "audio/ogg")},
+                    data={"model": "whisper-large-v3-turbo", "language": "ar"},
+                    timeout=30,
+                )
+                if res.status_code == 200:
+                    return res.json().get("text", "").strip()
+            except Exception:
+                continue
     except Exception as exc:
         print(f"Voice Transcribe Err: {exc}", flush=True)
     return ""
 
 
 def _extract_pdf_text(raw_bytes: bytes) -> str:
-    """استخراج النصوص والجداول من ملفات PDF النصية."""
     try:
         import pdfplumber
 
@@ -54,7 +55,6 @@ def _extract_pdf_text(raw_bytes: bytes) -> str:
 
 
 def _extract_office_text(raw_bytes: bytes, mime_type: str) -> str:
-    """استخراج النصوص والجداول من ملفات Excel و Word."""
     try:
         if any(k in mime_type for k in ("spreadsheet", "excel")):
             import openpyxl
@@ -83,14 +83,12 @@ def _extract_office_text(raw_bytes: bytes, mime_type: str) -> str:
 
 
 def _summarize_extracted(raw_text: str, user_prompt: str, default_q: str, sys_role: str, limit: int = 8500) -> str:
-    """حماية البيانات الحساسة في النص المستخرج ثم تحليله."""
     safe_txt = mask_saudi_pii(raw_text[:limit])
     question = user_prompt or default_q
     return ai_ask(f"{question}\n\nالمحتوى:\n{safe_txt}", sys_role, mode="arabic")
 
 
 def _analyze_with_vision(raw_bytes: bytes, mime_type: str, user_prompt: str) -> str:
-    """تحليل الصور والمستندات الممسوحة ضوئياً عبر Gemini Vision."""
     if not GEM_KEYS:
         return "⚠️ تعذر تحليل الصورة لعدم توفر مفتاح الرؤية."
 
@@ -99,16 +97,18 @@ def _analyze_with_vision(raw_bytes: bytes, mime_type: str, user_prompt: str) -> 
     payload = {"contents": [{"parts": [{"text": prompt}, {"inline_data": {"mime_type": mime_type, "data": b64}}]}]}
 
     for key in rotated_keys(GEM_KEYS):
-        url = f"{URLS['gemini']}gemini-2.0-flash:generateContent?key={key}"
-        res = SESSION.post(url, json=payload, timeout=35)
-        if res.status_code == 200:
-            answer = res.json()["candidates"]["content"]["parts"]["text"].strip()
-            return mask_saudi_pii(answer)
+        try:
+            url = f"{URLS['gemini']}gemini-2.0-flash:generateContent?key={key}"
+            res = SESSION.post(url, json=payload, timeout=35)
+            if res.status_code == 200:
+                answer = res.json()["candidates"]["content"]["parts"]["text"].strip()
+                return mask_saudi_pii(answer)
+        except Exception:
+            continue
     return "⚠️ تعذر تحليل الصورة حالياً."
 
 
 def read_media_from_url(file_url: str, mime_type: str = "image/jpeg", user_prompt: str = "") -> str:
-    """البوابة الموحدة لقراءة وتحليل الصوتيات، المستندات، الجداول، والصور."""
     if mime_type.startswith("audio/"):
         transcript = transcribe_voice_note(file_url)
         return f"🎙 *نص البصمة الصوتية:*\n{transcript}" if transcript else "⚠️ تعذر تفريغ البصمة الصوتية."

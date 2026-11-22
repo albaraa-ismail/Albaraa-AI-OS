@@ -85,7 +85,7 @@ def _ask_gemini(key: str, prompt: str, system: str, temp: float) -> Optional[str
         "contents": [{"parts": [{"text": full_text}]}],
         "generationConfig": {"temperature": temp, "maxOutputTokens": 2048},
     }
-    for model in ("gemini-2.5-flash", "gemini-2.5-flash-lite"):
+        for model in ("gemini-3.5-flash-lite", "gemini-3.8-flash"):
         url = f"{URLS['gemini']}{model}:generateContent?key={key}"
         res = SESSION.post(url, json=payload, timeout=DEFAULT_TIMEOUT)
         if res.status_code == 200:

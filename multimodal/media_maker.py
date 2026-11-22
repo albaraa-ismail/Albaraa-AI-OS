@@ -1,7 +1,7 @@
 import asyncio
 import os
 import re
-import time
+import uuid
 import edge_tts
 
 from core.config import FISH_KEY, MY_VOICE_ID, URLS
@@ -13,9 +13,11 @@ STICKER_TRIGGER_RE = re.compile(r"^(?:صمم ملصق|ملصق)[:\s]*")
 
 
 def _cleanup_file(path: str) -> None:
-    """حذف الملف المؤقت بأمان إن وُجد."""
-    if os.path.exists(path):
-        os.remove(path)
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 async def _edge_tts_saudi(text: str, out_mp3: str, female: bool = False) -> None:
@@ -24,8 +26,15 @@ async def _edge_tts_saudi(text: str, out_mp3: str, female: bool = False) -> None
     await comm.save(out_mp3)
 
 
+def _run_async_safe(coro) -> None:
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
 def generate_saudi_voice(text: str, out_mp3: str, female: bool = False) -> str:
-    """توليد صوت سعودي طبيعي عبر استنساخ الصوت أو المحرك العصبي الاحتياطي."""
     if FISH_KEY and MY_VOICE_ID and not female:
         try:
             headers = {"Authorization": f"Bearer {FISH_KEY}", "Content-Type": "application/json"}
@@ -38,18 +47,19 @@ def generate_saudi_voice(text: str, out_mp3: str, female: bool = False) -> str:
         except Exception as exc:
             print(f"Fish TTS fallback: {exc}", flush=True)
 
-    asyncio.run(_edge_tts_saudi(text, out_mp3, female=female))
+    _run_async_safe(_edge_tts_saudi(text, out_mp3, female=female))
     return "saudi_neural"
 
 
 def make_voice_note(cid: str, msg: str) -> None:
-    """تحويل النص إلى رسالة صوتية وإرسالها عبر واتساب."""
     is_female = any(k in msg for k in ("نسائي", "بنت", "امرأة", "أنثوي"))
     clean = VOICE_TRIGGER_RE.sub("", msg.strip()).strip()
+    if not clean:
+        return
     if len(clean) > 500:
         clean = ai_ask(clean, "لخص النص التالي في 3 جمل عربية فصيحة مناسبة للإلقاء الصوتي الواضح:", mode="arabic")
 
-    out_mp3 = f"/tmp/voice_{int(time.time())}.mp3"
+    out_mp3 = f"/tmp/voice_{uuid.uuid4().hex[:8]}.mp3"
     try:
         generate_saudi_voice(clean, out_mp3, female=is_female)
         send_file(cid, out_mp3, "Voice_Message.mp3", "audio/mpeg", "🎙 تسجيل صوتي")
@@ -58,7 +68,6 @@ def make_voice_note(cid: str, msg: str) -> None:
 
 
 def make_sticker(cid: str, text_or_topic: str) -> None:
-    """تصميم وإرسال ملصق واتساب (WebP) بالهوية البصرية."""
     import arabic_reshaper
     from bidi.algorithm import get_display
     from PIL import Image, ImageDraw
@@ -71,7 +80,7 @@ def make_sticker(cid: str, text_or_topic: str) -> None:
     draw.rounded_rectangle([20, 20, 492, 492], radius=60, outline=(255, 209, 102, 255), width=8)
     draw.text((256, 256), reshaped, fill=(255, 255, 255, 255), anchor="mm")
 
-    out_webp = f"/tmp/sticker_{int(time.time())}.webp"
+    out_webp = f"/tmp/sticker_{uuid.uuid4().hex[:8]}.webp"
     try:
         img.save(out_webp, "WEBP")
         send_file(cid, out_webp, "sticker.webp", "image/webp", "")
@@ -80,5 +89,4 @@ def make_sticker(cid: str, text_or_topic: str) -> None:
 
 
 def make_ppt(cid: str, msg: str) -> None:
-    """دالة توافقية لتوليد العروض التقديمية."""
     make_pptx(cid, msg)

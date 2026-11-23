@@ -65,6 +65,23 @@ def sb(method: str, table: str, data: Any = None, q: str = "") -> Any:
     return fallback
 
 
+def send_msg(chat_id: str, text: str) -> Optional[dict[str, Any]]:
+    if not GREEN_ID or not GREEN_TOKEN or not chat_id:
+        return None
+    target = chat_id if "@" in chat_id else f"{chat_id}@c.us"
+    url = f"{GREEN_BASE}/waInstance{GREEN_ID}/sendMessage/{GREEN_TOKEN}"
+    try:
+        res = SESSION.post(url, json={"chatId": target, "message": text}, timeout=15)
+        if res.status_code == 200:
+            data = res.json()
+            print(f"OUT [200] -> {target}: {json.dumps(data)}", flush=True)
+            return data
+        print(f"WA Err [{res.status_code}]: {res.text[:120]}", flush=True)
+    except Exception as exc:
+        print(f"WA Conn Err: {exc}", flush=True)
+    return None
+
+
 def _messages(prompt: str, system: str) -> list[dict[str, str]]:
     return ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
 

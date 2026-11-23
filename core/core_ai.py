@@ -1,8 +1,7 @@
-import os
+import re
 import json
-import time
 import base64
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 import requests
 
 from core.config import (
@@ -15,12 +14,11 @@ from core.event_bus import BUS
 
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "Albaraa-AI-OS/3.1"})
+DEFAULT_TIMEOUT = 45
 
 GEMINI_BASE_URL = URLS["gemini"]
 GEM_KEY = GEM_KEYS[0] if GEM_KEYS else ""
 _rotated = rotated_keys
-
-DEFAULT_TIMEOUT = 45
 
 MODE_ROUTING: dict[str, list[str]] = {
     "arabic": ["gemini", "groq", "cohere", "openrouter", "cloudflare", "samba"],
@@ -29,26 +27,29 @@ MODE_ROUTING: dict[str, list[str]] = {
     "reasoning": ["gemini", "groq", "samba", "cohere", "openrouter", "cloudflare"],
 }
 
-GEMINI_MODELS = (
-    "gemini-3.1-flash-lite-preview",
-    "gemini-3-flash-preview",
-)
+GEMINI_MODELS = ("gemini-3.1-flash-lite", "gemini-3-flash-preview")
 
-OPENAI_COMPAT_MODELS: dict[str, tuple[str, str]] = {
+OPENAI_COMPAT: dict[str, tuple[str, str]] = {
     "groq": (URLS["groq_chat"], "llama-3.3-70b-versatile"),
     "samba": (URLS["samba"], "Meta-Llama-3.3-70B-Instruct"),
     "openrouter": (URLS["openrouter"], "openrouter/free"),
+}
+
+KEY_POOLS: dict[str, list[str]] = {
+    "gemini": GEM_KEYS,
+    "groq": GROQ_KEYS,
+    "samba": SAMBA_KEYS,
+    "cohere": COHERE_KEYS,
+    "openrouter": OR_KEYS,
 }
 
 
 def sb(method: str, table: str, data: Any = None, q: str = "") -> Any:
     method_upper = method.upper()
     fallback = [] if method_upper == "GET" else None
-
     if not SB_URL or not SB_KEY:
         return fallback
 
-    url = f"{SB_URL}/rest/v1/{table}{q}"
     headers = {
         "apikey": SB_KEY,
         "Authorization": f"Bearer {SB_KEY}",
@@ -56,41 +57,41 @@ def sb(method: str, table: str, data: Any = None, q: str = "") -> Any:
         "Prefer": "return=representation",
     }
     try:
-        res = SESSION.request(method_upper, url, headers=headers, json=data, timeout=15)
+        res = SESSION.request(method_upper, f"{SB_URL}/rest/v1/{table}{q}", headers=headers, json=data, timeout=15)
         if res.status_code in (200, 201):
             return res.json()
     except Exception as exc:
         print(f"SB Err [{table}]: {exc}", flush=True)
-
     return fallback
 
 
-def _build_messages(prompt: str, system: str) -> list[dict[str, str]]:
-    messages = [{"role": "system", "content": system}] if system else []
-    messages.append({"role": "user", "content": prompt})
-    return messages
+def _messages(prompt: str, system: str) -> list[dict[str, str]]:
+    return ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
 
 
-def _ask_openai_compat(provider: str, key: str, prompt: str, system: str, temp: float, max_tokens: int = 2048) -> Optional[str]:
-    base_url, model = OPENAI_COMPAT_MODELS[provider]
-    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-    payload = {
-        "model": model,
-        "messages": _build_messages(prompt, system),
-        "temperature": temp,
-        "max_tokens": max_tokens,
-    }
+def _post(url: str, payload: dict[str, Any], headers: Optional[dict[str, str]] = None, tag: str = "") -> Optional[dict[str, Any]]:
     try:
-        res = SESSION.post(base_url, headers=headers, json=payload, timeout=DEFAULT_TIMEOUT)
+        res = SESSION.post(url, headers=headers or {"Content-Type": "application/json"}, json=payload, timeout=DEFAULT_TIMEOUT)
         if res.status_code == 200:
-            return res.json()["choices"][0]["message"]["content"].strip()
-        print(f"API Err [{provider}]: {res.status_code} - {res.text[:120]}", flush=True)
+            return res.json()
+        print(f"API Err [{tag}]: {res.status_code} - {res.text[:120]}", flush=True)
     except Exception as exc:
-        print(f"Conn Err [{provider}]: {exc}", flush=True)
+        print(f"Conn Err [{tag}]: {exc}", flush=True)
     return None
 
 
-def _ask_gemini(key: str, prompt: str, system: str, temp: float, max_tokens: int = 2048) -> Optional[str]:
+def _ask_openai_compat(provider: str, key: str, prompt: str, system: str, temp: float, max_tokens: int) -> Optional[str]:
+    url, model = OPENAI_COMPAT[provider]
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    payload = {"model": model, "messages": _messages(prompt, system), "temperature": temp, "max_tokens": max_tokens}
+    data = _post(url, payload, headers, provider)
+    try:
+        return data["choices"][0]["message"]["content"].strip() if data else None
+    except (KeyError, IndexError, TypeError):
+        return None
+
+
+def _ask_gemini(key: str, prompt: str, system: str, temp: float, max_tokens: int) -> Optional[str]:
     payload: dict[str, Any] = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": temp, "maxOutputTokens": max_tokens},
@@ -99,48 +100,83 @@ def _ask_gemini(key: str, prompt: str, system: str, temp: float, max_tokens: int
         payload["systemInstruction"] = {"parts": [{"text": system}]}
 
     for model in GEMINI_MODELS:
-        url = f"{URLS['gemini']}{model}:generateContent?key={key}"
+        data = _post(f"{URLS['gemini']}{model}:generateContent?key={key}", payload, tag=f"gemini:{model}")
         try:
-            res = SESSION.post(url, json=payload, timeout=DEFAULT_TIMEOUT)
-            if res.status_code == 200:
-                return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-            print(f"API Err [gemini:{model}]: {res.status_code} - {res.text[:120]}", flush=True)
-        except Exception as exc:
-            print(f"Conn Err [gemini:{model}]: {exc}", flush=True)
+            if data:
+                return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        except (KeyError, IndexError, TypeError):
+            continue
     return None
 
 
-def _ask_cohere(key: str, prompt: str, system: str, temp: float, max_tokens: int = 2048) -> Optional[str]:
+def _ask_cohere(key: str, prompt: str, system: str, temp: float, max_tokens: int) -> Optional[str]:
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-    payload = {
-        "model": "command-a-03-2025",
-        "messages": _build_messages(prompt, system),
-        "temperature": temp,
-        "max_tokens": max_tokens,
-    }
+    payload = {"model": "command-a-03-2025", "messages": _messages(prompt, system), "temperature": temp, "max_tokens": max_tokens}
+    data = _post(URLS["cohere"], payload, headers, "cohere")
     try:
-        res = SESSION.post(URLS["cohere"], headers=headers, json=payload, timeout=DEFAULT_TIMEOUT)
-        if res.status_code == 200:
-            return res.json()["message"]["content"][0]["text"].strip()
-        print(f"API Err [cohere]: {res.status_code} - {res.text[:120]}", flush=True)
-    except Exception as exc:
-        print(f"Conn Err [cohere]: {exc}", flush=True)
-    return None
+        return data["message"]["content"][0]["text"].strip() if data else None
+    except (KeyError, IndexError, TypeError):
+        return None
 
 
 def _ask_cloudflare(prompt: str, system: str, temp: float) -> Optional[str]:
     if not CF_ACCOUNT or not CF_TOKEN:
         return None
     headers = {"Authorization": f"Bearer {CF_TOKEN}", "Content-Type": "application/json"}
-    payload = {"messages": _build_messages(prompt, system), "temperature": temp}
-    try:
-        res = SESSION.post(URLS["cloudflare"], headers=headers, json=payload, timeout=DEFAULT_TIMEOUT)
-        if res.status_code == 200:
-            return res.json().get("result", {}).get("response", "").strip()
-        print(f"API Err [cloudflare]: {res.status_code} - {res.text[:120]}", flush=True)
-    except Exception as exc:
-        print(f"Conn Err [cloudflare]: {exc}", flush=True)
+    data = _post(URLS["cloudflare"], {"messages": _messages(prompt, system), "temperature": temp}, headers, "cloudflare")
+    return (data.get("result", {}).get("response") or "").strip() or None if data else None
+
+
+def _call_provider(provider: str, prompt: str, system: str, temp: float, max_tokens: int) -> Optional[str]:
+    if provider == "cloudflare":
+        return _ask_cloudflare(prompt, system, temp)
+
+    keys = _rotated(KEY_POOLS.get(provider, []))
+    for key in keys:
+        if provider in OPENAI_COMPAT:
+            res = _ask_openai_compat(provider, key, prompt, system, temp, max_tokens)
+        elif provider == "gemini":
+            res = _ask_gemini(key, prompt, system, temp, max_tokens)
+        elif provider == "cohere":
+            res = _ask_cohere(key, prompt, system, temp, max_tokens)
+        else:
+            res = None
+        if res:
+            return res
     return None
+
+
+def ai_ask(
+    prompt: str,
+    system: str = "",
+    temperature: float = 0.4,
+    mode: str = "general",
+    max_tokens: int = 2048,
+    use_cache: bool = True,
+) -> str:
+    if use_cache:
+        cached = SMART_CACHE.get(prompt, system, mode)
+        if cached:
+            return cached
+
+    providers = MODE_ROUTING.get(mode, MODE_ROUTING["general"])
+    for provider in providers:
+        if hasattr(FAILOVER, "is_available") and not FAILOVER.is_available(provider):
+            continue
+
+        reply = _call_provider(provider, prompt, system, temperature, max_tokens)
+        if reply:
+            if hasattr(FAILOVER, "record_success"):
+                FAILOVER.record_success(provider)
+            if use_cache:
+                SMART_CACHE.set(prompt, system, mode, reply)
+            BUS.emit("ai_response", {"provider": provider, "mode": mode})
+            return reply
+
+        if hasattr(FAILOVER, "record_failure"):
+            FAILOVER.record_failure(provider)
+
+    return "عذراً، جميع محركات الذكاء الاصطناعي مشغولة حالياً. يرجى المحاولة بعد قليل."
 
 
 def ai_vision(image_bytes: bytes, mime_type: str, prompt: str, system: str = "") -> Optional[str]:
@@ -148,34 +184,27 @@ def ai_vision(image_bytes: bytes, mime_type: str, prompt: str, system: str = "")
         return None
     b64_data = base64.b64encode(image_bytes).decode("utf-8")
     payload: dict[str, Any] = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": prompt},
-                    {"inline_data": {"mime_type": mime_type, "data": b64_data}},
-                ]
-            }
-        ],
+        "contents": [{"parts": [{"text": prompt}, {"inline_data": {"mime_type": mime_type, "data": b64_data}}]}],
         "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2048},
     }
     if system:
         payload["systemInstruction"] = {"parts": [{"text": system}]}
 
-    for key in GEM_KEYS:
-        url = f"{URLS['gemini']}gemini-3-flash-preview:generateContent?key={key}"
+    for key in _rotated(GEM_KEYS):
+        data = _post(f"{URLS['gemini']}gemini-3-flash-preview:generateContent?key={key}", payload, tag="vision")
         try:
-            res = SESSION.post(url, json=payload, timeout=DEFAULT_TIMEOUT)
-            if res.status_code == 200:
-                return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-        except Exception as exc:
-            print(f"Vision Err: {exc}", flush=True)
+            if data:
+                return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        except (KeyError, IndexError, TypeError):
+            continue
     return None
 
 
 def ai_ask_json(prompt: str, system: str = "", mode: str = "fast") -> dict[str, Any]:
     strict_system = f"{system}\nأجب بصيغة JSON صالحة فقط بدون أي نص إضافي أو علامات Markdown.".strip()
     raw = ai_ask(prompt, system=strict_system, temperature=0.1, mode=mode, use_cache=False)
-    cleaned = raw.replace("```json", "").replace("```", "").strip()
+    match = re.search(r"\{.*\}", raw, re.DOTALL)
+    cleaned = match.group(0) if match else raw.replace("```json", "").replace("```", "").strip()
     try:
         return json.loads(cleaned)
     except Exception:
@@ -192,262 +221,3 @@ def check_providers_health() -> dict[str, bool]:
         "cloudflare": bool(CF_ACCOUNT and CF_TOKEN),
         "supabase": bool(SB_URL and SB_KEY),
     }
-import os
-import json
-import time
-import base64
-from typing import Any, Callable, Optional
-import requests
-
-from core.config import (
-    SB_URL, SB_KEY, GREEN_ID, GREEN_TOKEN, GREEN_BASE,
-    GEM_KEYS, GROQ_KEYS, SAMBA_KEYS, COHERE_KEYS, OR_KEYS,
-    CF_ACCOUNT, CF_TOKEN, URLS, rotated_keys
-)
-from core.failover_cache import SMART_CACHE, FAILOVER
-from core.event_bus import BUS
-
-SESSION = requests.Session()
-SESSION.headers.update({"User-Agent": "Albaraa-AI-OS/3.1"})
-
-GEMINI_BASE_URL = URLS["gemini"]
-GEM_KEY = GEM_KEYS[0] if GEM_KEYS else ""
-_rotated = rotated_keys
-
-DEFAULT_TIMEOUT = 45
-
-MODE_ROUTING: dict[str, list[str]] = {
-    "arabic": ["gemini", "groq", "cohere", "openrouter", "cloudflare", "samba"],
-    "fast": ["groq", "gemini", "openrouter", "cohere", "cloudflare", "samba"],
-    "general": ["groq", "gemini", "cohere", "openrouter", "cloudflare", "samba"],
-    "reasoning": ["gemini", "groq", "samba", "cohere", "openrouter", "cloudflare"],
-}
-
-GEMINI_MODELS = (
-    "gemini-3.1-flash-lite-preview",
-    "gemini-3-flash-preview",
-)
-
-OPENAI_COMPAT_MODELS: dict[str, tuple[str, str]] = {
-    "groq": (URLS["groq_chat"], "llama-3.3-70b-versatile"),
-    "samba": (URLS["samba"], "Meta-Llama-3.3-70B-Instruct"),
-    "openrouter": (URLS["openrouter"], "openrouter/free"),
-}
-
-
-def sb(method: str, table: str, data: Any = None, q: str = "") -> Any:
-    method_upper = method.upper()
-    fallback = [] if method_upper == "GET" else None
-
-    if not SB_URL or not SB_KEY:
-        return fallback
-
-    url = f"{SB_URL}/rest/v1/{table}{q}"
-    headers = {
-        "apikey": SB_KEY,
-        "Authorization": f"Bearer {SB_KEY}",
-        "Content-Type": "application/json",
-        "Prefer": "return=representation",
-    }
-    try:
-        res = SESSION.request(method_upper, url, headers=headers, json=data, timeout=15)
-        if res.status_code in (200, 201):
-            return res.json()
-    except Exception as exc:
-        print(f"SB Err [{table}]: {exc}", flush=True)
-
-    return fallback
-
-
-def _build_messages(prompt: str, system: str) -> list[dict[str, str]]:
-    messages = [{"role": "system", "content": system}] if system else []
-    messages.append({"role": "user", "content": prompt})
-    return messages
-
-
-def _ask_openai_compat(provider: str, key: str, prompt: str, system: str, temp: float, max_tokens: int = 2048) -> Optional[str]:
-    base_url, model = OPENAI_COMPAT_MODELS[provider]
-    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-    payload = {
-        "model": model,
-        "messages": _build_messages(prompt, system),
-        "temperature": temp,
-        "max_tokens": max_tokens,
-    }
-    try:
-        res = SESSION.post(base_url, headers=headers, json=payload, timeout=DEFAULT_TIMEOUT)
-        if res.status_code == 200:
-            return res.json()["choices"][0]["message"]["content"].strip()
-        print(f"API Err [{provider}]: {res.status_code} - {res.text[:120]}", flush=True)
-    except Exception as exc:
-        print(f"Conn Err [{provider}]: {exc}", flush=True)
-    return None
-
-
-def _ask_gemini(key: str, prompt: str, system: str, temp: float, max_tokens: int = 2048) -> Optional[str]:
-    payload: dict[str, Any] = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": temp, "maxOutputTokens": max_tokens},
-    }
-    if system:
-        payload["systemInstruction"] = {"parts": [{"text": system}]}
-
-    for model in GEMINI_MODELS:
-        url = f"{URLS['gemini']}{model}:generateContent?key={key}"
-        try:
-            res = SESSION.post(url, json=payload, timeout=DEFAULT_TIMEOUT)
-            if res.status_code == 200:
-                return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-            print(f"API Err [gemini:{model}]: {res.status_code} - {res.text[:120]}", flush=True)
-        except Exception as exc:
-            print(f"Conn Err [gemini:{model}]: {exc}", flush=True)
-    return None
-
-
-def _ask_cohere(key: str, prompt: str, system: str, temp: float, max_tokens: int = 2048) -> Optional[str]:
-    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-    payload = {
-        "model": "command-a-03-2025",
-        "messages": _build_messages(prompt, system),
-        "temperature": temp,
-        "max_tokens": max_tokens,
-    }
-    try:
-        res = SESSION.post(URLS["cohere"], headers=headers, json=payload, timeout=DEFAULT_TIMEOUT)
-        if res.status_code == 200:
-            return res.json()["message"]["content"][0]["text"].strip()
-        print(f"API Err [cohere]: {res.status_code} - {res.text[:120]}", flush=True)
-    except Exception as exc:
-        print(f"Conn Err [cohere]: {exc}", flush=True)
-    return None
-
-
-def _ask_cloudflare(prompt: str, system: str, temp: float) -> Optional[str]:
-    if not CF_ACCOUNT or not CF_TOKEN:
-        return None
-    headers = {"Authorization": f"Bearer {CF_TOKEN}", "Content-Type": "application/json"}
-    payload = {"messages": _build_messages(prompt, system), "temperature": temp}
-    try:
-        res = SESSION.post(URLS["cloudflare"], headers=headers, json=payload, timeout=DEFAULT_TIMEOUT)
-        if res.status_code == 200:
-            return res.json().get("result", {}).get("response", "").strip()
-        print(f"API Err [cloudflare]: {res.status_code} - {res.text[:120]}", flush=True)
-    except Exception as exc:
-        print(f"Conn Err [cloudflare]: {exc}", flush=True)
-    return None
-
-
-def ai_ask(
-    prompt: str,
-    system: str = "",
-    temperature: float = 0.4,
-    mode: str = "general",
-    use_cache: bool = True,
-) -> str:
-    t0 = time.time()
-    if use_cache:
-        cached = SMART_CACHE.get(prompt, system, mode)
-        if cached:
-            latency_ms = round((time.time() - t0) * 1000, 1)
-            BUS.publish("ai.cache_hit", {"mode": mode, "latency_ms": latency_ms})
-            return cached
-
-    pools: dict[str, list[str]] = {
-        "gemini": rotated_keys(GEM_KEYS),
-        "cohere": rotated_keys(COHERE_KEYS),
-        "groq": rotated_keys(GROQ_KEYS),
-        "samba": rotated_keys(SAMBA_KEYS),
-        "openrouter": rotated_keys(OR_KEYS),
-        "cloudflare": ["cf"] if (CF_ACCOUNT and CF_TOKEN) else [],
-    }
-
-    order = MODE_ROUTING.get(mode, MODE_ROUTING["general"])
-    providers = [(provider, key) for provider in order for key in pools[provider]]
-
-    handlers: dict[str, Callable[[str], Optional[str]]] = {
-        "groq": lambda k: _ask_openai_compat("groq", k, prompt, system, temperature),
-        "samba": lambda k: _ask_openai_compat("samba", k, prompt, system, temperature),
-        "openrouter": lambda k: _ask_openai_compat("openrouter", k, prompt, system, temperature),
-        "gemini": lambda k: _ask_gemini(k, prompt, system, temperature),
-        "cohere": lambda k: _ask_cohere(k, prompt, system, temperature),
-        "cloudflare": lambda _: _ask_cloudflare(prompt, system, temperature),
-    }
-
-    answer = FAILOVER.execute_chain(providers, lambda prov: handlers[prov[0]](prov[1]))
-    latency_ms = round((time.time() - t0) * 1000, 1)
-
-    if answer:
-        if use_cache:
-            SMART_CACHE.set(prompt, answer, system, mode)
-        BUS.publish("ai.response_ok", {"mode": mode, "latency_ms": latency_ms})
-        return answer
-
-    BUS.publish("ai.response_failed", {"mode": mode, "latency_ms": latency_ms})
-    return "⚠ تعذر الحصول على استجابة من المحركات حالياً، يرجى إعادة المحاولة."
-
-
-def ai_ask_json(prompt: str, system: str = "", mode: str = "fast") -> Optional[dict[str, Any]]:
-    json_system = f"{system}\nأرجع النتيجة بصيغة JSON صالحة فقط بدون أي نص إضافي.".strip()
-    raw = ai_ask(prompt, json_system, temperature=0.2, mode=mode, use_cache=False)
-    clean = raw.replace("```json", "").replace("```", "").strip()
-
-    try:
-        start, end = clean.find("{"), clean.rfind("}") + 1
-        if start != -1 and end > start:
-            return json.loads(clean[start:end])
-    except json.JSONDecodeError:
-        pass
-    return None
-
-
-def ai_vision(image_bytes: bytes, mime_type: str, prompt: str, system: str = "") -> Optional[str]:
-    if not GEM_KEYS:
-        return None
-    b64_data = base64.b64encode(image_bytes).decode("utf-8")
-    payload: dict[str, Any] = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": prompt},
-                    {"inline_data": {"mime_type": mime_type, "data": b64_data}},
-                ]
-            }
-        ],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2048},
-    }
-    if system:
-        payload["systemInstruction"] = {"parts": [{"text": system}]}
-
-    for key in rotated_keys(GEM_KEYS):
-        url = f"{URLS['gemini']}gemini-3-flash-preview:generateContent?key={key}"
-        try:
-            res = SESSION.post(url, json=payload, timeout=DEFAULT_TIMEOUT)
-            if res.status_code == 200:
-                return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-        except Exception as exc:
-            print(f"Vision Err: {exc}", flush=True)
-    return None
-
-
-def ai_audio_transcribe(audio_bytes: bytes, filename: str = "audio.ogg", language: str = "ar") -> Optional[str]:
-    if not GROQ_KEYS:
-        return None
-    url = "https://groq.com"
-    for key in rotated_keys(GROQ_KEYS):
-        headers = {"Authorization": f"Bearer {key}"}
-        files = {"file": (filename, audio_bytes)}
-        data = {"model": "whisper-large-v3-turbo", "language": language, "response_format": "json"}
-        try:
-            res = SESSION.post(url, headers=headers, files=files, data=data, timeout=DEFAULT_TIMEOUT)
-            if res.status_code == 200:
-                return res.json().get("text", "").strip()
-        except Exception as exc:
-            print(f"Audio Err: {exc}", flush=True)
-    return None
-
-
-def check_providers_health() -> dict[str, bool]:
-    return {
-        "gemini": bool(GEM_KEYS),
-        "groq": bool(GROQ_KEYS),
-        "samba": bool(SAMBA_KEYS),

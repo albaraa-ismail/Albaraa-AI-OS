@@ -5,8 +5,9 @@ import uuid
 import edge_tts
 
 from core.config import FISH_KEY, MY_VOICE_ID, URLS
-from core.core_ai import SESSION, ai_ask, send_file
+from core.core_ai import SESSION, ai_ask
 from multimodal.office_tools import make_pptx
+from multimodal.pro_capabilities import send_file
 
 VOICE_TRIGGER_RE = re.compile(r"^(?:اقرأ بصوت نسائي|اقرأ بصوت|بصمة صوتية)[:\s]*")
 STICKER_TRIGGER_RE = re.compile(r"^(?:صمم ملصق|ملصق)[:\s]*")
@@ -70,7 +71,7 @@ def make_voice_note(cid: str, msg: str) -> None:
 def make_sticker(cid: str, text_or_topic: str) -> None:
     import arabic_reshaper
     from bidi.algorithm import get_display
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageDraw, ImageFont
 
     clean_txt = STICKER_TRIGGER_RE.sub("", text_or_topic.strip()).strip()[:30] or "تم الإنجاز"
     reshaped = get_display(arabic_reshaper.reshape(clean_txt))
@@ -78,7 +79,12 @@ def make_sticker(cid: str, text_or_topic: str) -> None:
     img = Image.new("RGBA", (512, 512), (11, 25, 44, 245))
     draw = ImageDraw.Draw(img)
     draw.rounded_rectangle([20, 20, 492, 492], radius=60, outline=(255, 209, 102, 255), width=8)
-    draw.text((256, 256), reshaped, fill=(255, 255, 255, 255), anchor="mm")
+    font = None
+    for fp in ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"):
+        if os.path.exists(fp):
+            font = ImageFont.truetype(fp, 44)
+            break
+    draw.text((256, 256), reshaped, fill=(255, 255, 255, 255), font=font, anchor="mm")
 
     out_webp = f"/tmp/sticker_{uuid.uuid4().hex[:8]}.webp"
     try:

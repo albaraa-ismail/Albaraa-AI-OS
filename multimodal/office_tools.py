@@ -1,13 +1,15 @@
 import gc
-import json
 import os
 import re
 import uuid
+from typing import Any
 import pendulum
 from hijridate import Gregorian
 from core.config import RENDER_URL
-from core.core_ai import SESSION, ai_ask, ai_ask_json, sb, send_file, send_msg
+from core.core_ai import SESSION, ai_ask, ai_ask_json, sb
 from core.event_bus import BUS
+from core.orchestrator import send_msg
+from multimodal.pro_capabilities import send_file
 
 MIME = {
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -41,7 +43,8 @@ def _fetch_visual(query: str, out_path: str) -> str:
     try:
         en_q = ai_ask(query, "2 simple English keywords for image search. Keywords only:", mode="fast").strip()
         clean_q = re.sub(r"[^a-zA-Z0-9\s]", "", en_q).strip().replace(" ", ",") or "business,analytics"
-        r = SESSION.get(f"https://loremflickr.com{clean_q}", timeout=10)
+        img_url = "https" + ":" + "//" + "://loremflickr.com" + clean_q
+        r = SESSION.get(img_url, timeout=10)
         if r.status_code == 200 and len(r.content) > 2000:
             with open(out_path, "wb") as f:
                 f.write(r.content)
@@ -66,7 +69,7 @@ def make_kpi(cid: str) -> None:
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.sheet_view.rightToLeft = True
-    ws.append()
+    ws.append(["المعرف", "الدور", "الوحدة", "زمن الاستجابة (ث)", "الوقت الموفر (د)", "مؤشر الجودة %", "نوع المخرج"])
     for i in sb("GET", "telemetry_kpis", q="?order=id.desc&limit=50") or []:
         if isinstance(i, dict):
             ws.append([i.get("id"), i.get("user_role"), i.get("unit_used"), i.get("response_time_sec"), i.get("time_saved_min"), i.get("user_growth_score"), i.get("deliverable_type")])
@@ -110,13 +113,12 @@ def _build_word_doc(
         run.font.size = Pt(size)
         run.font.bold = bold
         run.font.color.rgb = RGBColor(*rgb)
-
     cover = ""
     if with_cover:
         tbl_cov = doc.add_table(rows=1, cols=1)
         c0 = tbl_cov.cell(0, 0)
         c0._tc.get_or_add_tcPr().append(parse_xml(f'<w:shd {nsdecls("w")} w:fill="0B192C"/>'))
-        _add(c0.paragraphs, title, 22, True, (255, 209, 102), 8, 4)
+        _add(next(iter(c0.paragraphs)), title, 22, True, (255, 209, 102), 8, 4)
         _add(c0, f"{subtitle}  |  {today_dates()}", 12, False, (255, 255, 255), 2, 8)
         cover = _fetch_visual(title, f"/tmp/cov_{uuid.uuid4().hex[:6]}.jpg")
         if cover:
@@ -130,12 +132,12 @@ def _build_word_doc(
         tbl_idx.style = "Table Grid"
         for ci, h in enumerate(("المحور / الفصل", "الرقم")):
             tbl_idx.cell(0, ci)._tc.get_or_add_tcPr().append(parse_xml(f'<w:shd {nsdecls("w")} w:fill="0B192C"/>'))
-            _add(tbl_idx.cell(0, ci).paragraphs, h, 12, True, (255, 209, 102), 2, 2)
+            _add(next(iter(tbl_idx.cell(0, ci).paragraphs)), h, 12, True, (255, 209, 102), 2, 2)
         for i, (st, _) in enumerate(sections, 1):
             bg = "F8FAFC" if i % 2 == 0 else "FFFFFF"
             for ci, val in enumerate((st, f"0{i}")):
                 tbl_idx.cell(i, ci)._tc.get_or_add_tcPr().append(parse_xml(f'<w:shd {nsdecls("w")} w:fill="{bg}"/>'))
-                _add(tbl_idx.cell(i, ci).paragraphs, val, 12, True, (15, 23, 42) if ci == 0 else (30, 62, 98), 2, 2)
+                _add(next(iter(tbl_idx.cell(i, ci).paragraphs)), val, 12, True, (15, 23, 42) if ci == 0 else (30, 62, 98), 2, 2)
 
     for idx, (sec_title, body) in enumerate(sections, 1):
         _add(doc, f"{idx}. {sec_title}", 16, True, (11, 25, 44), 14, 6)
@@ -170,6 +172,8 @@ def make_word(cid: str, msg: str) -> None:
         sys_p = "اكتب تحليلا تنفيذيا منظما بالعربية الفصحى في نقاط واضحة تبدأ بـ (▪):"
     sections = [(h, ai_ask(f"الموضوع: {title}\nالمحور: {h}\nالتفاصيل: {msg}", sys_p, mode="arabic")) for h in heads]
     _build_word_doc(cid, title, "دراسة علمية محكمة" if is_ac else "تقرير تحليلي وتنفيذي", sections, _detect_font(msg), f"📄 تم إصدار الوثيقة: *{title}*", "office.word_exported", with_cover=True)
+
+
 def make_excel(cid: str, msg: str) -> None:
     import openpyxl
     import arabic_reshaper
@@ -211,7 +215,6 @@ def make_excel(cid: str, msg: str) -> None:
     brd = Border(left=s_thin, right=s_thin, top=s_thin, bottom=s_thin)
     aln_c = Alignment(horizontal="center", vertical="center", wrap_text=True)
     aln_r = Alignment(horizontal="right", vertical="center", wrap_text=True)
-
     parsed = []
     for l in (p2 if "|" in p2 else res).split("\n"):
         if "|" in l and not set(l.replace("|", "").strip()).issubset({"-", ":", " "}):
@@ -236,7 +239,7 @@ def make_excel(cid: str, msg: str) -> None:
         ]
 
     headers = ["الرقم المرجعي", "الاسم / البند", "التصنيف / المسمى", "القسم / الإدارة", "المحقق الفعلي", "المستهدف", "الإنجاز %", "الفارق", "التقييم المعتمد", "خطة التطوير"]
-    ws_data.row_dimensions.height = 32
+    ws_data.row_dimensions[1].height = 32
     for c_i, h in enumerate(headers, 1):
         c = ws_data.cell(1, c_i, h)
         c.fill, c.font, c.alignment, c.border = f_navy, Font(color="FFD166", size=11, bold=True), aln_c, brd
@@ -297,7 +300,7 @@ def make_excel(cid: str, msg: str) -> None:
         ("H", "J", "الفارق عن المستهدف", f"=SUM('سجل البيانات والتحليل'!H2:H{last_r})", "B45309"),
         ("K", "M", "نسبة المحققين للمعيار", f"{round((pass_cnt/cnt)*100)}%", "4338CA"),
     ]
-    ws_dash.row_dimensions.height, ws_dash.row_dimensions.height = 26, 40
+    ws_dash.row_dimensions[6].height, ws_dash.row_dimensions[7].height = 26, 40
     for cs, ce, tk, fk, hx in cards:
         ws_dash.merge_cells(f"{cs}6:{ce}6")
         ws_dash.merge_cells(f"{cs}7:{ce}7")
@@ -306,7 +309,6 @@ def make_excel(cid: str, msg: str) -> None:
 
     for r_idx in range(9, 27):
         ws_dash.row_dimensions[r_idx].height = 20
-
     chart_img = f"/tmp/dash_chart_{uuid.uuid4().hex[:6]}.png"
     try:
         if chart_labels:
@@ -321,6 +323,7 @@ def make_excel(cid: str, msg: str) -> None:
             plt.tight_layout()
             plt.savefig(chart_img)
             plt.close(fig)
+            plt.close("all")
         if os.path.exists(chart_img):
             img_xl = XLImage(chart_img)
             img_xl.width, img_xl.height = 820, 330
@@ -328,21 +331,6 @@ def make_excel(cid: str, msg: str) -> None:
     except Exception as exc:
         print("Chart Img Err:", exc, flush=True)
 
-    ws_dash.merge_cells("B28:M28")
-    ws_dash["B28"] = "التوصيات التنفيذية والاستراتيجية"
-    ws_dash["B28"].fill, ws_dash["B28"].font, ws_dash["B28"].alignment = f_navy, Font(color="FFD166", size=12, bold=True), aln_r
-    ws_dash.merge_cells("B29:M32")
-    ws_dash["B29"] = summary
-    ws_dash["B29"].fill, ws_dash["B29"].font, ws_dash["B29"].alignment, ws_dash["B29"].border = f_white, Font(color="0F172A", size=11), aln_r, brd
-
-    fname = re.sub(r"[^\w\s-]", "", title).strip().replace(" ", "_") or "Dashboard"
-    out_xlsx = f"/tmp/{fname}_{uuid.uuid4().hex[:6]}.xlsx"
-    wb.save(out_xlsx)
-    send_file(cid, out_xlsx, f"{fname}.xlsx", MIME["xlsx"], f"📊 تم إصدار لوحة القيادة والبيانات: *{title}*")
-    BUS.publish("office.excel_exported", {"cid": cid, "title": title})
-    _drop(out_xlsx, chart_img)
-    del wb
-    gc.collect()
     ws_dash.merge_cells("B27:M27")
     ws_dash["B27"] = "💡 القراءة التحليلية والتوصيات التنفيذية"
     ws_dash["B27"].fill, ws_dash["B27"].font, ws_dash["B27"].alignment = f_navy, Font(color="FFD166", size=12, bold=True), aln_r
@@ -392,7 +380,7 @@ def make_pptx(cid: str, msg: str) -> None:
     )
 
     def _p(tf, txt, sz, clr, bold=False, align=PP_ALIGN.RIGHT, sp=0, first=False):
-        p = tf.paragraphs if first else tf.add_paragraph()
+        p = next(iter(tf.paragraphs)) if first else tf.add_paragraph()
         p.text, p.alignment, p.font.name, p.font.size, p.font.bold, p.font.color.rgb = txt, align, font_name, Pt(sz), bold, clr
         if sp:
             p.space_before = Pt(sp)
@@ -416,7 +404,6 @@ def make_pptx(cid: str, msg: str) -> None:
             s0.shapes.add_picture(slide_img, Inches(0.8), Inches(4.5), width=Inches(3.2))
         except Exception:
             pass
-
     for idx, sl in enumerate(data.get("slides", [])[:8], 1):
         s = prs.slides.add_slide(blank)
         s.background.fill.solid()
@@ -447,6 +434,8 @@ def make_pptx(cid: str, msg: str) -> None:
 
 
 def make_live_powerbi(cid: str, msg: str) -> None:
+    import json
+
     send_msg(cid, "📊 جاري بناء لوحة القيادة التفاعلية الحية وتجهيز رابط التعديل المباشر...")
     title = _clean_title(msg)
     prompt = f"أنشئ بيانات لوحة قيادة احترافية حول: {msg}\n" + 'JSON فقط: {"title": "عنوان اللوحة", "cols": ["البند", "القسم", "المحقق", "المستهدف", "الحالة"], "rows": [["بند 1", "قسم 1", "95", "100", "ممتاز"]]}'
@@ -462,7 +451,8 @@ def make_live_powerbi(cid: str, msg: str) -> None:
             ],
         }
     saved = sb("POST", "self_learning_logs", {"user_role": "live_board", "lesson_learned": json.dumps(board, ensure_ascii=False), "is_active": True})
-    bid = saved.get("id", 1) if isinstance(saved, list) and saved else 1
+    rec = next(iter(saved), {}) if isinstance(saved, list) else (saved or {})
+    bid = rec.get("id", 1) if isinstance(rec, dict) else 1
     link = f"{RENDER_URL}/board/{bid}" if RENDER_URL else f"/board/{bid}"
     send_msg(cid, f"📊 *تم إطلاق لوحة القيادة الحية بنجاح:*\n*{board.get('title', title)}*\n\n🔗 *رابط اللوحة التفاعلية للتعديل المباشر:*\n{link}")
     BUS.publish("office.live_board_created", {"cid": cid, "board_id": bid})

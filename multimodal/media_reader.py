@@ -1,8 +1,6 @@
-import base64
 import io
-
-from core.config import GEM_KEYS, GROQ_KEYS, URLS, rotated_keys
-from core.core_ai import SESSION, ai_ask
+from core.config import GROQ_KEYS, URLS, rotated_keys
+from core.core_ai import SESSION, ai_ask, ai_vision
 from security.safe_guard import mask_saudi_pii
 
 
@@ -40,10 +38,9 @@ def _extract_pdf_text(raw_bytes: bytes) -> str:
         with pdfplumber.open(io.BytesIO(raw_bytes)) as pdf:
             for idx, page in enumerate(pdf.pages[:15], 1):
                 txt = (page.extract_text() or "").strip()
-                tables = page.extract_tables() or []
                 tbl_lines = [
                     " | ".join(str(cell or "").strip() for cell in row)
-                    for tbl in tables
+                    for tbl in (page.extract_tables() or [])
                     for row in tbl
                 ]
                 tbl_str = "\n".join(tbl_lines).strip()
@@ -77,6 +74,17 @@ def _extract_office_text(raw_bytes: bytes, mime_type: str) -> str:
                 for row in tbl.rows:
                     paras.append(" | ".join(c.text.strip() for c in row.cells))
             return "\n".join(paras).strip()
+
+        if any(k in mime_type for k in ("presentation", "pptx")):
+            from pptx import Presentation
+
+            prs = Presentation(io.BytesIO(raw_bytes))
+            slides_txt: list[str] = []
+            for idx, slide in enumerate(prs.slides[:20], 1):
+                lines = [sh.text.strip() for sh in slide.shapes if getattr(sh, "has_text_frame", False) and sh.text.strip()]
+                if lines:
+                    slides_txt.append(f"--- شريحة {idx} ---\n" + "\n".join(lines))
+            return "\n".join(slides_txt).strip()
     except Exception:
         pass
     return ""
@@ -84,28 +92,7 @@ def _extract_office_text(raw_bytes: bytes, mime_type: str) -> str:
 
 def _summarize_extracted(raw_text: str, user_prompt: str, default_q: str, sys_role: str, limit: int = 8500) -> str:
     safe_txt = mask_saudi_pii(raw_text[:limit])
-    question = user_prompt or default_q
-    return ai_ask(f"{question}\n\nالمحتوى:\n{safe_txt}", sys_role, mode="arabic")
-
-
-def _analyze_with_vision(raw_bytes: bytes, mime_type: str, user_prompt: str) -> str:
-    if not GEM_KEYS:
-        return "⚠️ تعذر تحليل الصورة لعدم توفر مفتاح الرؤية."
-
-    b64 = base64.b64encode(raw_bytes).decode("utf-8")
-    prompt = user_prompt or "حلل محتوى هذه الصورة أو الوثيقة بدقة واستخرج جميع النصوص والأرقام والجداول باللغة العربية بدون مقدمات."
-    payload = {"contents": [{"parts": [{"text": prompt}, {"inline_data": {"mime_type": mime_type, "data": b64}}]}]}
-
-    for key in rotated_keys(GEM_KEYS):
-        try:
-            url = f"{URLS['gemini']}gemini-2.0-flash:generateContent?key={key}"
-            res = SESSION.post(url, json=payload, timeout=35)
-            if res.status_code == 200:
-                answer = res.json()["candidates"]["content"]["parts"]["text"].strip()
-                return mask_saudi_pii(answer)
-        except Exception:
-            continue
-    return "⚠️ تعذر تحليل الصورة حالياً."
+    return ai_ask(f"{user_prompt or default_q}\n\nالمحتوى:\n{safe_txt}", sys_role, mode="arabic")
 
 
 def read_media_from_url(file_url: str, mime_type: str = "image/jpeg", user_prompt: str = "") -> str:
@@ -122,7 +109,7 @@ def read_media_from_url(file_url: str, mime_type: str = "image/jpeg", user_promp
             return "⚠️ تعذر تحميل الملف من الرابط."
         raw_bytes = res.content
 
-        if any(k in mime_type for k in ("spreadsheet", "excel", "wordprocessing", "docx")):
+        if any(k in mime_type for k in ("spreadsheet", "excel", "wordprocessing", "docx", "presentation", "pptx")):
             if extracted := _extract_office_text(raw_bytes, mime_type):
                 return _summarize_extracted(
                     extracted,
@@ -141,7 +128,9 @@ def read_media_from_url(file_url: str, mime_type: str = "image/jpeg", user_promp
                     limit=9000,
                 )
 
-        return _analyze_with_vision(raw_bytes, mime_type, user_prompt)
+        prompt = user_prompt or "حلل محتوى هذه الصورة أو الوثيقة بدقة واستخرج جميع النصوص والأرقام والجداول باللغة العربية بدون مقدمات."
+        vision_reply = ai_vision(raw_bytes, mime_type, prompt)
+        return mask_saudi_pii(vision_reply) if vision_reply else "⚠️ تعذر تحليل الصورة حالياً."
     except Exception as exc:
         print(f"Media URL Read Err: {exc}", flush=True)
         return "⚠️ تعذر تحليل الملف أو الصورة حالياً."

@@ -14,25 +14,15 @@ def digits_only(val: str) -> str:
 
 
 def load_api_keys(prefix: str) -> list[str]:
-    keys: list[str] = []
-    if base := _env(prefix):
-        keys.append(base)
-    for i in range(1, 10):
-        for fmt in (f"{prefix}_{i}", f"{prefix}{i}"):
-            if (key := _env(fmt)) and key not in keys:
-                keys.append(key)
-    return keys
+    candidates = [prefix] + [f"{prefix}{sep}{i}" for i in range(1, 10) for sep in ("_", "")]
+    return list(dict.fromkeys(k for c in candidates if (k := _env(c))))
 
 
 def rotated_keys(keys: list[str]) -> list[str]:
     if len(keys) <= 1:
         return list(keys)
-    idx = random.randint(0, len(keys) - 1)
+    idx = random.randrange(len(keys))
     return keys[idx:] + keys[:idx]
-
-
-def _u(host: str, path: str = "") -> str:
-    return "https://" + host + path
 
 
 ADMIN_PHONE = digits_only(_env("ADMIN_PHONE"))
@@ -42,7 +32,7 @@ ALLOWED_GROUP = _env("ALLOWED_GROUP")
 RENDER_URL = _env("RENDER_EXTERNAL_URL").rstrip("/")
 GITHUB_TOKEN = _env("GITHUB_TOKEN")
 GITHUB_REPO = _env("GITHUB_REPO", "albaraa-ismail/Albaraa-AI-OS")
-GITHUB_API = _u("api.github.com")
+GITHUB_API = "https://github.com"
 
 SB_URL = _env("SUPABASE_URL").rstrip("/")
 SB_KEY = _env("SUPABASE_KEY")
@@ -53,7 +43,7 @@ _raw_green = _env("GREEN_API_URL").rstrip("/")
 GREEN_BASE = (
     (_raw_green if _raw_green.endswith("waInstance") else f"{_raw_green}/waInstance")
     if _raw_green
-    else _u("api.green-api.com", "/waInstance")
+    else "https://green-api.com"
 )
 
 GEM_KEYS = load_api_keys("GEMINI_API_KEY")
@@ -69,12 +59,15 @@ FISH_KEY = _env("FISH_API_KEY")
 MY_VOICE_ID = _env("MY_VOICE_ID")
 
 URLS: dict[str, str] = {
-    "gemini": _u("generativelanguage.googleapis.com", "/v1beta/models/"),
-    "groq_chat": _u("api.groq.com", "/openai/v1/chat/completions"),
-    "groq_audio": _u("api.groq.com", "/openai/v1/audio/transcriptions"),
-    "samba": _u("api.sambanova.ai", "/v1/chat/completions"),
-    "cohere": _u("api.cohere.com", "/v2/chat"),
-    "openrouter": _u("openrouter.ai", "/api/v1/chat/completions"),
-    "cloudflare": _u("api.cloudflare.com", f"/client/v4/accounts/{CF_ACCOUNT}/ai/run/@cf/meta/llama-3.3-70b-instruct-fp8-fast"),
-    "fish_tts": _u("api.fish.audio", "/v1/tts"),
+    "gemini": "https://googleapis.com",
+    "groq_chat": "https://groq.com",
+    "groq_audio": "https://groq.com",
+    "samba": "https://sambanova.ai",
+    "cohere": "https://cohere.com",
+    "openrouter": "https://openrouter.ai",
+    "cloudflare": (
+        f"https://cloudflare.com{CF_ACCOUNT}/ai/run/@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+        if CF_ACCOUNT else ""
+    ),
+    "fish_tts": "https://fish.audio",
 }

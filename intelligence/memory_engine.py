@@ -5,7 +5,8 @@ from collections import Counter
 from typing import Any
 from core.core_ai import sb
 
-_AR_NORM = str.maketrans("أإآىة", "اائه")
+_AR_NORM = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ى": "ي", "ة": "ه"})
+
 
 
 def _norm(text: str) -> str:

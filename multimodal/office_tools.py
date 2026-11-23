@@ -43,7 +43,7 @@ def _fetch_visual(query: str, out_path: str) -> str:
     try:
         en_q = ai_ask(query, "2 simple English keywords for image search. Keywords only:", mode="fast").strip()
         clean_q = re.sub(r"[^a-zA-Z0-9\s]", "", en_q).strip().replace(" ", ",") or "business,analytics"
-                img_url = "https" + ":" + "//" + "://loremflickr.com" + clean_q
+        img_url = "".join(["https", ":", "//", "loremflickr", ".com/800/450/", clean_q])
         r = SESSION.get(img_url, timeout=10)
         if r.status_code == 200 and len(r.content) > 2000:
             with open(out_path, "wb") as f:

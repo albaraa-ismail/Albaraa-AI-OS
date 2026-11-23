@@ -24,10 +24,14 @@ def _gh_url(path: str) -> str:
     return f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{path.strip()}"
 
 
+def _first_record(data: Any) -> Optional[dict[str, Any]]:
+    item = next(iter(data), None) if isinstance(data, list) else data
+    return item if isinstance(item, dict) else None
+
+
 def _load_proposal(pid: int) -> Optional[dict[str, Any]]:
-    res = sb("GET", "self_learning_logs", q=f"?id=eq.{pid}")
-    rec = res if isinstance(res, list) and res else res
-    if not isinstance(rec, dict):
+    rec = _first_record(sb("GET", "self_learning_logs", q=f"?id=eq.{pid}"))
+    if not rec:
         return None
     try:
         return json.loads(rec.get("lesson_learned", "{}"))
@@ -75,8 +79,13 @@ def propose_safe_upgrade(topic: str = "تحسين سرعة الاستجابة و
         return
 
     prop["code"] = code_body
-    saved = sb("POST", "self_learning_logs", {"user_role": "evolution_proposal", "lesson_learned": json.dumps(prop, ensure_ascii=False), "is_active": True})
-    pid = saved.get("id", 0) if isinstance(saved, list) and saved else 0
+    saved = sb(
+        "POST",
+        "self_learning_logs",
+        {"user_role": "evolution_proposal", "lesson_learned": json.dumps(prop, ensure_ascii=False), "is_active": True},
+    )
+    rec = _first_record(saved)
+    pid = rec.get("id", 0) if rec else 0
     if not pid:
         return
 
@@ -85,7 +94,7 @@ def propose_safe_upgrade(topic: str = "تحسين سرعة الاستجابة و
         f"🛡️ *مقترح تطوير ذاتي جاهز (✅ AST)*\n• *الرقم:* `{pid}` | *العنوان:* {prop.get('title')}\n"
         f"• *الملف:* `{prop.get('target_file')}` | *المخاطرة:* {prop.get('risk_level')}\n"
         f"• *التفاصيل:* {prop.get('summary')}\n\n"
-        f"📄 `عرض كود {pid}` | ✅ `اعتماد التطوير {pid}` | ❌ `رفض التطوير {pid}`"
+        f"📄 `عرض كود {pid}` | ✅ `اعتماد التطوير {pid}` | ❌ `رفض التطوير {pid}`",
     )
 
 

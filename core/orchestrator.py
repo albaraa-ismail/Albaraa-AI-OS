@@ -1,7 +1,8 @@
 import time
-from typing import Any
+import requests
 
-from core.core_ai import ai_ask, send_msg
+from core.config import GREEN_BASE, GREEN_ID, GREEN_TOKEN
+from core.core_ai import ai_ask
 from core.event_bus import BUS
 from intelligence.builder_agent import BuilderAgent
 from intelligence.learning_agent import QualityReviewerAgent
@@ -18,11 +19,29 @@ from telemetry.evolution_engine import log_kpi
 from telemetry.realtime_monitor import MONITOR
 
 
+def send_msg(cid: str, text: str) -> bool:
+    if not (GREEN_ID and GREEN_TOKEN and cid and text):
+        return False
+    chat_id = cid if "@" in cid else f"{cid}@c.us"
+    url = f"{GREEN_BASE}{GREEN_ID}/sendMessage/{GREEN_TOKEN}"
+    try:
+        res = requests.post(url, json={"chatId": chat_id, "message": text}, timeout=15)
+        return res.status_code == 200
+    except Exception as exc:
+        print(f"WA Send Err: {exc}", flush=True)
+        return False
+
+
 class ChiefOrchestrator:
     def __init__(self) -> None:
         self.researcher = ResearchAgent()
         self.builder = BuilderAgent()
         self.reviewer = QualityReviewerAgent(llm_callable=ai_ask)
+
+    def _abort(self, cid: str, t0: float, event: str, meta: dict, reply: str) -> str:
+        MONITOR.record_end("chief_orchestrator", time.time() - t0, success=False)
+        AUDIT_LEDGER.append(cid, event, meta)
+        return reply
 
     def build_execution_plan(self, goal: str, intent: str) -> str:
         sys_prompt = (
@@ -45,27 +64,22 @@ class ChiefOrchestrator:
 
         try:
             session = IAM_GATEWAY.resolve_session(cid, requested_role=role)
-            if not session["authorized"]:
-                MONITOR.record_end("chief_orchestrator", time.time() - t0, success=False)
-                return "عذرا، لا تملك صلاحية الوصول إلى هذه الوحدة."
+            if not session.get("authorized"):
+                return self._abort(cid, t0, "ACCESS_DENIED", {"role": role}, "عذراً، لا تملك صلاحية الوصول إلى هذه الوحدة.")
 
             sec = inspect_prompt_injection(raw_msg, cid)
-            if not sec["is_safe"]:
-                AUDIT_LEDGER.append(cid, "SECURITY_BLOCK", {"rule": sec["matched_rule"]})
-                MONITOR.record_end("chief_orchestrator", time.time() - t0, success=False)
-                return "تم حظر هذا الطلب لمخالفته ضوابط الأمن السيبراني والحوكمة."
+            if not sec.get("is_safe", True):
+                return self._abort(cid, t0, "SECURITY_BLOCK", {"rule": sec.get("matched_rule")}, "تم حظر هذا الطلب لمخالفته ضوابط الأمن السيبراني والحوكمة.")
 
             masked_msg, pii_map = PII_MASKER.mask(raw_msg)
             normalized = normalize_arabic_dialect(masked_msg)
 
             ml_pred = INTENT_CLASSIFIER.predict(normalized)
-            intent = ml_pred["intent"]
-            if ml_pred["is_anomaly"]:
-                AUDIT_LEDGER.append(cid, "ANOMALY_DETECTED", {"score": ml_pred["anomaly_score"]})
+            intent = ml_pred.get("intent", "general")
+            if ml_pred.get("is_anomaly"):
+                AUDIT_LEDGER.append(cid, "ANOMALY_DETECTED", {"score": ml_pred.get("anomaly_score")})
 
-            candidates = ["research", "code", "general"]
-            if intent in candidates:
-                candidates = [intent] + [c for c in candidates if c != intent]
+            candidates = [intent] + [c for c in ("research", "code", "general") if c != intent] if intent in ("research", "code", "general") else ["general", "research", "code"]
             chosen_agent = RL_ROUTER.select_agent(intent, candidates)
 
             memory_ctx = get_context(session["tenant_id"], normalized)
@@ -79,9 +93,8 @@ class ChiefOrchestrator:
                 sys_prompt = (
                     "أنت العقل المدبر ومساعد الأعمال والبحث والتقنية في Albaraa-AI-OS. "
                     "أجب باللغة العربية الفصحى بأسلوب بشري واضح ومباشر ومنظم دون مقدمات آلية."
+                    + (f"\n\n{memory_ctx}" if memory_ctx else "")
                 )
-                if memory_ctx:
-                    sys_prompt += f"\n\n{memory_ctx}"
                 prompt_body = f"خطة التنفيذ:\n{plan}\n\nالطلب:\n{normalized}" if plan else normalized
                 raw_answer = ai_ask(prompt_body, sys_prompt, temperature=0.35, mode="arabic")
 
@@ -93,7 +106,7 @@ class ChiefOrchestrator:
             final_answer = PII_MASKER.unmask(governed, pii_map)
 
             elapsed = time.time() - t0
-            reward = 1.0 if "⚠️" not in final_answer and len(final_answer) > 40 else 0.2
+            reward = 1.0 if "⚠️" not in final_answer and "عذراً" not in final_answer and len(final_answer) > 40 else 0.2
             RL_ROUTER.update_reward(intent, chosen_agent, reward)
 
             save_memory(session["tenant_id"], session["role"], sname, masked_msg, PII_MASKER.mask(final_answer)[0])
@@ -107,8 +120,7 @@ class ChiefOrchestrator:
             return final_answer
 
         except Exception as exc:
-            elapsed = time.time() - t0
-            MONITOR.record_end("chief_orchestrator", elapsed, success=False)
+            MONITOR.record_end("chief_orchestrator", time.time() - t0, success=False)
             AUDIT_LEDGER.append(cid, "TASK_FAILED", {"error": str(exc)[:120]})
             raise
 
@@ -116,11 +128,5 @@ class ChiefOrchestrator:
 ORCHESTRATOR = ChiefOrchestrator()
 
 
-def run_task(
-    cid: str,
-    raw_msg: str,
-    role: str = "admin",
-    sname: str = "User",
-    notify_whatsapp: bool = True,
-) -> str:
+def run_task(cid: str, raw_msg: str, role: str = "admin", sname: str = "User", notify_whatsapp: bool = True) -> str:
     return ORCHESTRATOR.execute(cid, raw_msg, role=role, sname=sname, notify_whatsapp=notify_whatsapp)

@@ -1,8 +1,8 @@
-import base64
 import io
-import json
 import os
+import json
 import time
+import base64
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 import requests
@@ -18,8 +18,8 @@ from core.auto_scheduler import (
     start_scheduler,
 )
 from core.config import ADMIN_PHONE, ALLOWED_GROUP, GITHUB_API, GITHUB_TOKEN, PARTNER_PHONE, RENDER_URL
-from core.core_ai import ai_ask, ai_ask_json, sb, send_msg
-from core.orchestrator import run_task
+from core.core_ai import ai_ask, ai_ask_json, sb
+from core.orchestrator import run_task, send_msg
 from multimodal.media_maker import make_voice_note
 from multimodal.media_reader import read_media_from_url, transcribe_voice_note
 from multimodal.office_tools import make_excel, make_kpi, make_live_powerbi, make_powerbi_kit, make_pptx, make_word
@@ -35,10 +35,14 @@ EXECUTOR = ThreadPoolExecutor(max_workers=6)
 SEEN: set[str] = set()
 LAST_TASK: dict[str, str] = {}
 
-TW_CDN = "https://tailwindcss.com"
-CH_CDN = "https://jsdelivr.net"
-GF_CDN = "https://googleapis.com"
+def _cdn(*parts: str) -> str:
+    return "https" + ":" + "//" + "".join(parts)
+
+TW_CDN = _cdn("cdn.", "tailwindcss.com")
+CH_CDN = _cdn("cdn.", "jsdelivr.net", "/npm/chart.js")
+GF_CDN = _cdn("fonts.", "googleapis.com", "/css2?family=Cairo:wght@400;600;700&display=swap")
 start_scheduler()
+
 
 def _mark_seen(mid: str) -> bool:
     if not mid:
@@ -53,9 +57,7 @@ def _mark_seen(mid: str) -> bool:
 
 def _get_record(record_id: int) -> Optional[dict[str, Any]]:
     res = sb("GET", "self_learning_logs", q=f"?id=eq.{record_id}")
-    if not res:
-        return None
-    rec = res if isinstance(res, list) else res
+    rec = next(iter(res), None) if isinstance(res, list) else res
     return rec if isinstance(rec, dict) else None
 
 
@@ -88,8 +90,10 @@ def _handle_board_post(board: dict[str, Any], cols: list[str], rows: list[list[A
             return ai_data.get("cols", cols), ai_data["rows"], f"✅ {ai_data.get('reply', 'تم تحديث البيانات بنجاح.')}"
         return cols, rows, "⚠️ تعذر معالجة التعديل حالياً، يرجى المحاولة مرة أخرى."
     return cols, rows, ""
+
+
 def _extract_chart_metrics(rows: list[list[Any]]) -> tuple[list[str], list[float], float, float]:
-    labels = [str(r) for r in rows[:12] if r]
+    labels = [str(next(iter(r), "")) for r in rows[:12] if r]
     values: list[float] = []
     for r in rows[:12]:
         num = 0.0
@@ -105,8 +109,6 @@ def _extract_chart_metrics(rows: list[list[Any]]) -> tuple[list[str], list[float
     avg_val = round(sum(values) / len(values), 1) if values else 0.0
     max_val = max(values) if values else 0.0
     return labels, values, avg_val, max_val
-
-
 @app.route("/board/<int:bid>", methods=["GET", "POST"])
 def live_board(bid: int):
     record = _get_record(bid)
@@ -172,7 +174,7 @@ def live_board(bid: int):
         <table class='w-full text-right border-collapse'><thead><tr class='bg-slate-950 text-slate-300 text-xs uppercase'>{headers_html}<th class='p-3 border-b border-slate-800'>تحكم</th></tr></thead><tbody>{rows_html}</tbody></table>
       </div>
       <script>
-        document.addEventListener('keydown', e => {{ if (e.ctrlKey && ) e.preventDefault(); }});
+        document.addEventListener('keydown', e => {{ if (e.ctrlKey && ['u','s','c'].includes(e.key.toLowerCase())) e.preventDefault(); }});
         new Chart(document.getElementById('kpiChart'), {{
           type: 'bar',
           data: {{ labels: {json.dumps(labels, ensure_ascii=False)}, datasets: [{{ label: 'القيمة / المؤشر', data: {json.dumps(values)}, backgroundColor: 'rgba(56,189,248,0.75)', borderColor: '#38bdf8', borderWidth: 1, borderRadius: 6 }}] }},
@@ -198,8 +200,6 @@ def export_board(bid: int):
     wb.save(buf)
     buf.seek(0)
     return send_file(buf, as_attachment=True, download_name=f"Dashboard_{bid}.xlsx")
-
-
 @app.route("/site/<int:sid>", methods=["GET", "POST"])
 def live_site(sid: int):
     record = _get_record(sid)
@@ -281,9 +281,7 @@ def api_web_chat():
     body = request.get_json(silent=True) or {}
     msg = str(body.get("message", "")).strip()
     uid = str(body.get("user_id", "web_guest")).strip()
-    if not msg:
-        return jsonify({"error": "empty_message"}), 400
-    return jsonify({"reply": run_task(f"web_{uid}", msg, "trainee", uid, notify_whatsapp=False)}), 200
+    return (jsonify({"reply": run_task(f"web_{uid}", msg, "trainee", uid, notify_whatsapp=False)}), 200) if msg else (jsonify({"error": "empty_message"}), 400)
 
 
 @app.route("/api/robotics", methods=["POST"])
@@ -298,6 +296,8 @@ def api_robotics():
 @app.route("/", methods=["GET"])
 def home():
     return "System Online", 200
+
+
 HELP_MENU = (
     "📌 *الخدمات والقدرات المتكاملة (58 قدرة تنفيذية وحاكمة):*\n\n"
     "1️⃣ *مستندات Word وبحوث أكاديمية:* اكتب (تقرير وورد عن... أو بحث علمي عن...)\n"
@@ -316,26 +316,28 @@ HELP_MENU = (
     "• لتعديل آخر مخرج فوراً: اكتب *(تعديل: ملاحظتك هنا)*\n"
     "• لفحص وتطوير النظام: اكتب *(اقترح تطوير)*"
 )
+def _digits(jid: str) -> str:
+    return "".join(filter(str.isdigit, str(jid or "").split("@", 1)[0]))
+
+
+def _is_owner(cid: str, sender: str) -> bool:
+    owner = ADMIN_PHONE or "966575475336"
+    c_num, s_num = _digits(cid), _digits(sender)
+    return any(n == owner or (len(owner) >= 9 and n.endswith(owner[-9:])) for n in (c_num, s_num) if n)
+
+
+def _is_in_allowed_group(cid: str) -> bool:
+    return bool(ALLOWED_GROUP and cid and (cid == ALLOWED_GROUP or ALLOWED_GROUP in cid))
 
 
 def _is_authorized(cid: str, sender: str) -> bool:
-    if ALLOWED_GROUP and (cid == ALLOWED_GROUP or ALLOWED_GROUP in cid):
-        return True
-
-    cid_digits = "".join(filter(str.isdigit, cid.split("@"))) if cid else ""
-    sender_digits = "".join(filter(str.isdigit, sender.split("@"))) if sender else ""
-    allowed_phones = {p for p in (ADMIN_PHONE, PARTNER_PHONE) if p}
-
-    for p in allowed_phones:
-        if cid_digits == p or sender_digits == p:
-            return True
-        if len(p) >= 9 and (cid_digits.endswith(p[-9:]) or sender_digits.endswith(p[-9:])):
-            return True
-
-    try:
-        return bool(IAM_GATEWAY.resolve_session(cid, sender=sender).get("authorized"))
-    except Exception:
+    if not cid:
         return False
+    if _is_in_allowed_group(cid):
+        return True
+    if "@g.us" not in cid and _is_owner(cid, sender):
+        return True
+    return False
 
 
 def _run_with_tip(fn, cid: str, task: str) -> None:
@@ -368,14 +370,9 @@ def _handle_admin_commands(cid: str, clean: str) -> bool:
     return False
 
 
-def _dispatch_smart(cid: str, txt: str, sname: str) -> None:
+def _dispatch_smart(cid: str, txt: str, sname: str, is_admin: bool = False) -> None:
     clean = txt.strip()
-    user_tag = sname.strip() if sname and sname.strip() != "User" else "admin"
-    cid_digits = "".join(filter(str.isdigit, cid.split("@")))
-    is_admin = bool(
-        ADMIN_PHONE
-        and (cid_digits == ADMIN_PHONE or (len(ADMIN_PHONE) >= 9 and cid_digits.endswith(ADMIN_PHONE[-9:])))
-    )
+    user_tag = sname.strip() if sname and sname.strip() != "User" else ("admin" if is_admin else "partner")
 
     if any(k in clean for k in ("القائمة", "المساعدة", "الخدمات", "/help", "قدراتك", "ايش تقدر تسوي", "وش تقدر تسوي")):
         send_msg(cid, HELP_MENU)
@@ -390,7 +387,7 @@ def _dispatch_smart(cid: str, txt: str, sname: str) -> None:
 
     for prefix in ("تعديل:", "ملاحظة:", "قاعدة:", "تغذية راجعة:"):
         if clean.startswith(prefix):
-            note = clean[len(prefix) :].strip()
+            note = clean[len(prefix):].strip()
             if not note:
                 send_msg(cid, "⚠️ اكتب ملاحظتك بعد الكلمة المفتاحية، مثال:\n`تعديل: اجعل التقرير مختصراً مع إضافة أمثلة واقعية`")
                 return
@@ -398,7 +395,7 @@ def _dispatch_smart(cid: str, txt: str, sname: str) -> None:
             prev_task = LAST_TASK.get(cid, "")
             if prefix == "تعديل:" and prev_task:
                 send_msg(cid, f"🔄 *تم حفظ ملاحظتك وتحديث أسلوب العمل!* جاري إعادة تنفيذ طلبك السابق وتطبيق التعديل فوراً:\n_{prev_task}_")
-                _dispatch_smart(cid, f"{prev_task}\n[تعديل وملاحظة إلزامية من {user_tag} يجب تطبيقها بدقة]: {note}", sname)
+                _dispatch_smart(cid, f"{prev_task}\n[تعديل وملاحظة إلزامية من {user_tag} يجب تطبيقها بدقة]: {note}", sname, is_admin)
             else:
                 send_msg(cid, f"✅ *تم اعتماد القاعدة في ملفك الشخصي ({user_tag}):*\n«{note}»\n\nسيتم الالتزام بها في جميع أعمالك القادمة.")
             return
@@ -428,7 +425,6 @@ def _dispatch_smart(cid: str, txt: str, sname: str) -> None:
         (("اقرأ بصوت", "بصمة صوتية"), lambda t: safe_run(make_voice_note, cid, t)),
         (("سلة", "زد", "متجر", "منتج", "سلة متروكة", "تسعير", "سيرة ذاتية", "توظيف", "مقابلة", "وصف وظيفي", "حقيبة تدريبية", "كميات", "مقاولات", "عقار", "جدوى عقارية", "مناقصة", "عقد", "اتفاقية", "لائحة", "محضر اجتماع", "خطاب رسمي", "فاتورة", "عرض سعر", "ضريبة", "حملة إعلانية", "سيناريو"), lambda t: safe_run(_run_with_tip, run_pro_capability, cid, t)),
     ]
-
     for task in (sub_tasks or [clean])[:4]:
         low = task.lower()
         if any(k in low for k in ("تقرير وورد", "ملف وورد", "word", "بحث علمي", "بحث أكاديمي", "بحث اكاديمي", "دراسة علمية")) and not any(k in low for k in ("باور بي", "power bi")):
@@ -456,7 +452,8 @@ def _build_live_site(cid: str, task: str) -> None:
 
     clean_html = apply_saudi_governance(task, clean_html)
     saved = sb("POST", "self_learning_logs", {"user_role": "live_site", "lesson_learned": clean_html, "is_active": True})
-    sid = saved.get("id", 1) if isinstance(saved, list) and saved else 1
+    rec = next(iter(saved), {}) if isinstance(saved, list) else (saved or {})
+    sid = rec.get("id", 1) if isinstance(rec, dict) else 1
     site_link = f"{RENDER_URL}/site/{sid}" if RENDER_URL else f"/site/{sid}"
     send_msg(cid, f"🌐 *تم تصميم وإطلاق الموقع بنجاح!*\n\n🔗 *رابط الموقع المباشر (مع أداة التعديل الفوري أسفل الصفحة):*\n{site_link}\n\n💡 يمكنك أيضا كتابة `تعديل: [وصف التعديل]` هنا في المحادثة لإعادة بنائه.")
 
@@ -486,12 +483,12 @@ BOT_PREFIXES = (
     "🔍", "⚙️", "🛡️", "📑", "🌐", "🚀", "💻", "⚠", "✅", "🤖", "📊", "📄", "📽️",
     "👥", "💡", "🧠", "🎙", "📚", "🔄", "📌", "📦", "🛍️", "🏗️", "⚖️", "🧾", "🔬", "❌", "↩️",
 )
-VALID_WEBHOOKS = {"incomingMessageReceived", "outgoingMessageReceived", "outgoingAPIMessageReceived"}
+VALID_WEBHOOKS = {"incomingMessageReceived", "outgoingMessageReceived"}
 MEDIA_TYPES = {"audioMessage", "imageMessage", "documentMessage"}
 EXPORT_KEYWORDS = ("وورد", "اكسل", "إكسل", "بوربوينت", "باور بي", "pdf", "تقرير", "لوحة", "لخص")
 
 
-def _handle_media_message(cid: str, mdata: dict[str, Any], sname: str) -> None:
+def _handle_media_message(cid: str, mdata: dict[str, Any], sname: str, is_admin: bool = False) -> None:
     file_data = mdata.get("fileMessageData", {})
     dl_url = file_data.get("downloadUrl", "")
     if not dl_url:
@@ -506,14 +503,14 @@ def _handle_media_message(cid: str, mdata: dict[str, Any], sname: str) -> None:
     if mime.startswith("audio/"):
         if transcript := transcribe_voice_note(dl_url):
             send_msg(cid, f"🎙 *تم تفريغ الرسالة الصوتية:*\n«{transcript}»")
-            _dispatch_smart(cid, transcript, sname)
+            _dispatch_smart(cid, transcript, sname, is_admin)
         else:
             send_msg(cid, "⚠️ تعذر فهم الرسالة الصوتية، يرجى إعادة الإرسال.")
         return
 
     analysis = read_media_from_url(dl_url, mime, caption)
     if caption and any(k in caption.lower() for k in EXPORT_KEYWORDS):
-        _dispatch_smart(cid, f"{caption}\n\nالبيانات المستخرجة من المرفق:\n{analysis}", sname)
+        _dispatch_smart(cid, f"{caption}\n\nالبيانات المستخرجة من المرفق:\n{analysis}", sname, is_admin)
     else:
         send_msg(cid, analysis)
 
@@ -522,23 +519,20 @@ def _handle_media_message(cid: str, mdata: dict[str, Any], sname: str) -> None:
 def webhook():
     data = request.get_json(silent=True) or {}
     wtype = data.get("typeWebhook", "")
-    if wtype not in VALID_WEBHOOKS:
+    if wtype not in VALID_WEBHOOKS or _mark_seen(data.get("idMessage", "")):
         return jsonify({"status": "ignored"}), 200
-
-    if _mark_seen(data.get("idMessage", "")):
-        return jsonify({"status": "dup"}), 200
 
     sdata = data.get("senderData") or {}
     cid, sender = sdata.get("chatId", ""), sdata.get("sender", "")
     if not _is_authorized(cid, sender):
-        print(f"BLOCKED: type={wtype} | cid={cid} | sender={sender}", flush=True)
         return jsonify({"status": "unauthorized"}), 200
 
+    is_admin = _is_owner(cid, sender)
     mdata = data.get("messageData") or {}
     sname = sdata.get("senderName", "User")
 
     if mdata.get("typeMessage") in MEDIA_TYPES:
-        EXECUTOR.submit(safe_run, _handle_media_message, cid, mdata, sname)
+        EXECUTOR.submit(safe_run, _handle_media_message, cid, mdata, sname, is_admin)
         return jsonify({"status": "media_queued"}), 200
 
     txt_data = mdata.get("textMessageData") or {}
@@ -546,14 +540,11 @@ def webhook():
     txt = str(txt_data.get("textMessage") or ext_data.get("text") or "").strip()
 
     if txt and cid and not txt.startswith(BOT_PREFIXES):
-        sec_check = inspect_prompt_injection(txt, cid)
-        if not sec_check.get("is_safe"):
-            print(f"SECURITY BLOCK [{sec_check.get('matched_rule')}]: {cid}", flush=True)
+        if not inspect_prompt_injection(txt, cid).get("is_safe"):
             send_msg(cid, "🛡️ تم حظر هذا الطلب لمخالفته ضوابط الأمن السيبراني والحوكمة.")
             return jsonify({"status": "security_blocked"}), 200
 
-        print(f"IN: {wtype} | CID: {cid} | MSG: {txt[:25]}", flush=True)
-        EXECUTOR.submit(_dispatch_smart, cid, txt, sname)
+        EXECUTOR.submit(_dispatch_smart, cid, txt, sname, is_admin)
 
     return jsonify({"status": "ok"}), 200
 

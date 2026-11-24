@@ -40,18 +40,65 @@ def _detect_font(msg: str) -> str:
 
 
 def _fetch_visual(query: str, out_path: str) -> str:
+    en_q = ai_ask(query, "2 simple English keywords for image search. Keywords only:", mode="fast").strip()
+    clean_words = re.sub(r"[^a-zA-Z0-9\s]", "", en_q).strip() or "business strategy"
     try:
-        en_q = ai_ask(query, "2 simple English keywords for image search. Keywords only:", mode="fast").strip()
-        clean_q = re.sub(r"[^a-zA-Z0-9\s]", "", en_q).strip().replace(" ", ",") or "business,analytics"
-        img_url = "".join(["https", ":", "//", "loremflickr", ".com/800/450/", clean_q])
-        r = SESSION.get(img_url, timeout=10)
-        if r.status_code == 200 and len(r.content) > 2000:
+        wiki_api = "".join(["https", ":", "//", "commons.wikimedia", ".org/w/api.php"])
+        params = {"action": "query", "generator": "search", "gsrsearch": f"filetype:bitmap {clean_words}", "gsrlimit": 5, "prop": "imageinfo", "iiprop": "url", "iiurlwidth": 800, "format": "json"}
+        res = SESSION.get(wiki_api, params=params, headers={"User-Agent": "AlbaraaOS/1.0"}, timeout=8)
+        if res.status_code == 200:
+            pages = res.json().get("query", {}).get("pages", {}).values()
+            for p in pages:
+                thumb = next(iter(p.get("imageinfo", [])), {}).get("thumburl", "")
+                if thumb and any(thumb.lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png")):
+                    img_r = SESSION.get(thumb, headers={"User-Agent": "AlbaraaOS/1.0"}, timeout=8)
+                    if img_r.status_code == 200 and len(img_r.content) > 5000:
+                        with open(out_path, "wb") as f:
+                            f.write(img_r.content)
+                        return out_path
+    except Exception:
+        pass
+
+    try:
+        tag = clean_words.replace(" ", ",")
+        fallback_url = "".join(["https", ":", "//", "loremflickr", ".com/800/450/", tag])
+        r = SESSION.get(fallback_url, timeout=8)
+        if r.status_code == 200 and len(r.content) > 3000:
             with open(out_path, "wb") as f:
                 f.write(r.content)
             return out_path
     except Exception:
         pass
     return ""
+
+
+def _make_word_chart(title: str, labels: list[str], values: list[float], out_path: str) -> str:
+    if not labels or not values:
+        return ""
+    try:
+        import arabic_reshaper
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from bidi.algorithm import get_display
+
+        _ar = lambda t: get_display(arabic_reshaper.reshape(str(t)[:18]), base_dir="R")
+        fig, ax = plt.subplots(figsize=(7.5, 3.2), dpi=130)
+        bars = ax.bar([_ar(l) for l in labels[:6]], values[:6], color=["#0B192C", "#1E3E62", "#D97706", "#059669", "#2563EB", "#7C3AED"], width=0.45)
+        ax.set_title(_ar(title), fontsize=12, fontweight="bold", color="#0B192C", pad=12)
+        ax.grid(axis="y", linestyle="--", alpha=0.35)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        for b in bars:
+            h = b.get_height()
+            ax.text(b.get_x() + b.get_width() / 2, h + (max(values) * 0.02), f"{h:g}", ha="center", va="bottom", fontsize=9, fontweight="bold")
+        plt.tight_layout()
+        plt.savefig(out_path)
+        plt.close(fig)
+        plt.close("all")
+        return out_path if os.path.exists(out_path) else ""
+    except Exception:
+        return ""
 
 
 def _drop(*paths: str) -> None:
@@ -61,8 +108,6 @@ def _drop(*paths: str) -> None:
                 os.remove(p)
             except OSError:
                 pass
-
-
 def make_kpi(cid: str) -> None:
     import openpyxl
 
@@ -91,6 +136,8 @@ def _build_word_doc(
     caption: str,
     event: str,
     with_cover: bool = True,
+    chart_data: dict[str, Any] | None = None,
+    table_rows: list[list[str]] | None = None,
 ) -> None:
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -113,7 +160,8 @@ def _build_word_doc(
         run.font.size = Pt(size)
         run.font.bold = bold
         run.font.color.rgb = RGBColor(*rgb)
-    cover = ""
+
+    cover, mid_img, chart_img = "", "", ""
     if with_cover:
         tbl_cov = doc.add_table(rows=1, cols=1)
         c0 = tbl_cov.cell(0, 0)
@@ -149,19 +197,45 @@ def _build_word_doc(
             txt = f"▪  {re.sub(r'^[\-\*\•\▪\s]+', '', cl)}" if cl.startswith(("-", "*", "•", "▪")) else cl.lstrip("# ")
             _add(doc, txt, 14 if is_h else 12.5, is_h, (30, 62, 98) if is_h else (30, 41, 59), 6 if is_h else 2, 4)
 
+        if idx == 2:
+            mid_img = _fetch_visual(sec_title, f"/tmp/mid_{uuid.uuid4().hex[:6]}.jpg")
+            if mid_img:
+                pm = doc.add_paragraph()
+                pm.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                pm.add_run().add_picture(mid_img, width=Inches(5.2))
+
+        if idx == 3 and chart_data:
+            chart_img = _make_word_chart(chart_data.get("title", title), chart_data.get("labels", []), chart_data.get("values", []), f"/tmp/wch_{uuid.uuid4().hex[:6]}.png")
+            if chart_img:
+                pc = doc.add_paragraph()
+                pc.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                pc.add_run().add_picture(chart_img, width=Inches(5.8))
+
+    if table_rows and len(table_rows) > 1:
+        _add(doc, "📊 جدول المؤشرات والمقارنات التنفيذية", 15, True, (11, 25, 44), 12, 6)
+        tbl_d = doc.add_table(rows=len(table_rows), cols=len(table_rows))
+        tbl_d.style = "Table Grid"
+        for ri, row_vals in enumerate(table_rows):
+            bg = "0B192C" if ri == 0 else ("F8FAFC" if ri % 2 == 0 else "FFFFFF")
+            fg = (255, 209, 102) if ri == 0 else (15, 23, 42)
+            for ci, val in enumerate(row_vals):
+                cell = tbl_d.cell(ri, ci)
+                cell._tc.get_or_add_tcPr().append(parse_xml(f'<w:shd {nsdecls("w")} w:fill="{bg}"/>'))
+                _add(next(iter(cell.paragraphs)), str(val), 11.5, ri == 0 or ci == 0, fg, 2, 2)
+
     fname = re.sub(r"[^\w\s-]", "", title).strip().replace(" ", "_") or "Document"
     path = f"/tmp/{fname}_{uuid.uuid4().hex[:6]}.docx"
     doc.save(path)
     send_file(cid, path, f"{fname}.docx", MIME["docx"], caption)
     BUS.publish(event, {"cid": cid, "title": title})
-    _drop(path, cover)
+    _drop(path, cover, mid_img, chart_img)
     del doc
     gc.collect()
 
 
 def make_word(cid: str, msg: str) -> None:
     is_ac = any(k in msg for k in ("بحث", "علمي", "أكاديمي", "اكاديمي", "دراسة", "مراجع"))
-    send_msg(cid, "📄 جاري إعداد الوثيقة وتنسيق الجداول والصور...")
+    send_msg(cid, "📄 جاري إعداد الوثيقة وتصميم الرسوم البيانية والصور والجداول...")
     title = _clean_title(msg)
     if is_ac:
         heads = ["الملخص التنفيذي ومشكلة البحث", "الإطار النظري والدراسات السابقة", "منهجية البحث", "النتائج والمناقشة", "الخاتمة والمراجع"]
@@ -171,9 +245,9 @@ def make_word(cid: str, msg: str) -> None:
         heads = [re.sub(r"^[\-\*\#\d\.\s]+", "", s).strip() for s in out.split("\n") if len(s.strip()) > 3][:5] or ["الإطار العام", "التحليل", "التنفيذ", "المؤشرات", "التوصيات"]
         sys_p = "اكتب تحليلا تنفيذيا منظما بالعربية الفصحى في نقاط واضحة تبدأ بـ (▪):"
     sections = [(h, ai_ask(f"الموضوع: {title}\nالمحور: {h}\nالتفاصيل: {msg}", sys_p, mode="arabic")) for h in heads]
-    _build_word_doc(cid, title, "دراسة علمية محكمة" if is_ac else "تقرير تحليلي وتنفيذي", sections, _detect_font(msg), f"📄 تم إصدار الوثيقة: *{title}*", "office.word_exported", with_cover=True)
-
-
+    vis = ai_ask_json(f"للموضوع: {title}\n" + 'أرجع JSON فقط لرسم بياني وجدول: {"chart_title": "عنوان الرسم", "labels": ["بند1", "بند2", "بند3", "بند4"], "values":, "table": [["المعيار", "القيمة الحالية", "المستهدف"], ["بند 1", "85%", "95%"], ["بند 2", "92%", "98%"], ["بند 3", "78%", "90%"]]}', "محلل بيانات.", mode="fast") or {}
+    chart_d = {"title": vis.get("chart_title", title), "labels": vis.get("labels", []), "values": vis.get("values", [])}
+    _build_word_doc(cid, title, "دراسة علمية محكمة" if is_ac else "تقرير تحليلي وتنفيذي", sections, _detect_font(msg), f"📄 تم إصدار الوثيقة المدعومة بالصور والرسوم البيانية: *{title}*", "office.word_exported", with_cover=True, chart_data=chart_d, table_rows=vis.get("table"))
 def make_excel(cid: str, msg: str) -> None:
     import openpyxl
     import arabic_reshaper
@@ -306,7 +380,6 @@ def make_excel(cid: str, msg: str) -> None:
         ws_dash.merge_cells(f"{cs}7:{ce}7")
         ws_dash[f"{cs}6"].value, ws_dash[f"{cs}6"].fill, ws_dash[f"{cs}6"].font, ws_dash[f"{cs}6"].alignment = tk, _fill(hx), Font(color="FFFFFF", size=11, bold=True), aln_c
         ws_dash[f"{cs}7"].value, ws_dash[f"{cs}7"].fill, ws_dash[f"{cs}7"].font, ws_dash[f"{cs}7"].alignment, ws_dash[f"{cs}7"].border = fk, f_white, Font(color=hx, size=18, bold=True), aln_c, brd
-
     for r_idx in range(9, 27):
         ws_dash.row_dimensions[r_idx].height = 20
     chart_img = f"/tmp/dash_chart_{uuid.uuid4().hex[:6]}.png"
@@ -438,8 +511,30 @@ def make_live_powerbi(cid: str, msg: str) -> None:
 
     send_msg(cid, "📊 جاري بناء لوحة القيادة التفاعلية الحية وتجهيز رابط التعديل المباشر...")
     title = _clean_title(msg)
-    prompt = f"أنشئ بيانات لوحة قيادة احترافية حول: {msg}\n" + 'JSON فقط: {"title": "عنوان اللوحة", "cols": ["البند", "القسم", "المحقق", "المستهدف", "الحالة"], "rows": [["بند 1", "قسم 1", "95", "100", "ممتاز"]]}'
-    board = ai_ask_json(prompt, "محلل بيانات محترف. أنشئ 6 صفوف بيانات واقعية.", mode="fast")
+    board = None
+
+    if any(k in msg for k in ("إنتاجية", "انتاجية", "الأداء", "الاداء", "kpi")):
+        kpis = sb("GET", "telemetry_kpis", q="?order=id.desc&limit=10") or []
+        if isinstance(kpis, list) and kpis:
+            board = {
+                "title": "لوحة قياس الإنتاجية والأداء الحية",
+                "cols": ["المستخدم", "الوحدة المنفذة", "زمن الإنجاز (ث)", "الوقت الموفر (د)", "مؤشر الجودة %"],
+                "rows": [
+                    [
+                        str(k.get("user_role", "admin")),
+                        str(k.get("unit_used", "orchestrator")),
+                        str(k.get("response_time_sec", 2.1)),
+                        str(k.get("time_saved_min", 25)),
+                        str(k.get("user_growth_score", 96)),
+                    ]
+                    for k in kpis if isinstance(k, dict)
+                ],
+            }
+
+    if not board:
+        prompt = f"أنشئ بيانات لوحة قيادة احترافية حول: {msg}\n" + 'JSON فقط: {"title": "عنوان اللوحة", "cols": ["البند", "القسم", "المحقق", "المستهدف", "الحالة"], "rows": [["بند 1", "قسم 1", "95", "100", "ممتاز"]]}'
+        board = ai_ask_json(prompt, "محلل بيانات محترف. أنشئ 6 صفوف بيانات واقعية.", mode="fast")
+
     if not isinstance(board, dict) or not board.get("rows"):
         board = {
             "title": title,

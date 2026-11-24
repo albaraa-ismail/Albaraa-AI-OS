@@ -225,7 +225,8 @@ def ai_generate_image(prompt: str) -> Optional[bytes]:
         use_cache=False,
     )
     if CF_ACCOUNT and CF_TOKEN:
-        url = f"https://cloudflare.com{CF_ACCOUNT}/ai/run/@cf/black-forest-labs/flux-1-schnell"
+        cf_base = "".join(["https://", "api.", "cloudflare.com", "/client/v4/accounts"])
+        url = f"{cf_base}/{CF_ACCOUNT}/ai/run/@cf/black-forest-labs/flux-1-schnell"
         try:
             res = SESSION.post(url, headers={"Authorization": f"Bearer {CF_TOKEN}"}, json={"prompt": en_prompt}, timeout=45)
             if res.status_code == 200 and res.content:

@@ -20,69 +20,17 @@ GEMINI_BASE_URL = URLS["gemini"]
 GEM_KEY = GEM_KEYS[0] if GEM_KEYS else ""
 _rotated = rotated_keys
 
-# توزيع الوكلاء حسب التخصص لضمان أقصى جودة وسرعة وعدم الضغط على مفتاح واحد
 MODE_ROUTING: dict[str, list[str]] = {
     "arabic": ["gemini", "samba", "groq", "cohere", "openrouter", "cloudflare"],
     "fast": ["groq", "samba", "gemini", "openrouter", "cloudflare"],
     "general": ["groq", "gemini", "samba", "openrouter", "cohere", "cloudflare"],
     "reasoning": ["gemini", "samba", "openrouter", "groq", "cohere"],
-    "coding": ["openrouter", "samba", "gemini", "groq"],     # مخصص للمواقع ولوحات التحكم والرسوم المتحركة
-    "office": ["gemini", "openrouter", "samba", "groq"],     # مخصص للعروض التقديمية والتقارير والملفات
+    "coding": ["openrouter", "samba", "gemini", "groq"],
+    "office": ["gemini", "openrouter", "samba", "groq"],
 }
 
-# تحديث نماذج Gemini لضمان الاستقرار والسرعة وتجنب خطأ 503
 GEMINI_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-3.1-flash-lite")
 
-# تحديث نماذج OpenAI-Compatible لإصلاح خطأ Groq 404 وتحسين جودة البرمجة في OpenRouter
-OPENAI_COMPAT: dict[str, tuple[str, str]] = {
-    "groq": (URLS["groq_chat"], "llama-3.3-70b-specdec"),
-    "samba": (URLS["samba"], "Meta-Llama-3.3-70B-Instruct"),
-    "openrouter": (URLS["openrouter"], "qwen/qwen-2.5-coder-32b-instruct:free"),
-}
-
-KEY_POOLS: dict[str, list[str]] = {
-    "gemini": GEM_KEYS,
-    "groq": GROQ_KEYS,
-    "samba": SAMBA_KEYS,
-    "cohere": COHERE_KEYS,
-    "openrouter": OR_KEYS,
-}
-import re
-import json
-import base64
-from typing import Any, Optional
-import requests
-
-from core.config import (
-    SB_URL, SB_KEY, GREEN_ID, GREEN_TOKEN, GREEN_BASE,
-    GEM_KEYS, GROQ_KEYS, SAMBA_KEYS, COHERE_KEYS, OR_KEYS,
-    CF_ACCOUNT, CF_TOKEN, URLS, rotated_keys
-)
-from core.failover_cache import SMART_CACHE, FAILOVER
-from core.event_bus import BUS
-
-SESSION = requests.Session()
-SESSION.headers.update({"User-Agent": "Albaraa-AI-OS/3.2"})
-DEFAULT_TIMEOUT = 45
-
-GEMINI_BASE_URL = URLS["gemini"]
-GEM_KEY = GEM_KEYS if GEM_KEYS else ""
-_rotated = rotated_keys
-
-# توزيع الوكلاء حسب التخصص لضمان أقصى سرعة وجودة وعدم الضغط على مفتاح واحد
-MODE_ROUTING: dict[str, list[str]] = {
-    "arabic": ["gemini", "samba", "groq", "cohere", "openrouter", "cloudflare"],
-    "fast": ["groq", "samba", "gemini", "openrouter", "cloudflare"],
-    "general": ["groq", "gemini", "samba", "openrouter", "cohere", "cloudflare"],
-    "reasoning": ["gemini", "samba", "openrouter", "groq", "cohere"],
-    "coding": ["openrouter", "samba", "gemini", "groq"],     # مخصص للمواقع ولوحات التحكم والرسوم المتحركة
-    "office": ["gemini", "openrouter", "samba", "groq"],     # مخصص للعروض التقديمية والتقارير والملفات
-}
-
-# نماذج Gemini مرتبة من الأكثر استقراراً وسرعة
-GEMINI_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-3.1-flash-lite")
-
-# تحديث نموذج Groq لإصلاح خطأ 404 وتحسين جودة البرمجة في OpenRouter
 OPENAI_COMPAT: dict[str, tuple[str, str]] = {
     "groq": (URLS["groq_chat"], "llama-3.3-70b-specdec"),
     "samba": (URLS["samba"], "Meta-Llama-3.3-70B-Instruct"),
@@ -149,15 +97,13 @@ def _post(url: str, payload: dict[str, Any], headers: Optional[dict[str, str]] =
     except Exception as exc:
         print(f"Conn Err [{tag}]: {exc}", flush=True)
     return None
-
-
 def _ask_openai_compat(provider: str, key: str, prompt: str, system: str, temp: float, max_tokens: int) -> Optional[str]:
     url, model = OPENAI_COMPAT[provider]
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     payload = {"model": model, "messages": _messages(prompt, system), "temperature": temp, "max_tokens": max_tokens}
     data = _post(url, payload, headers, provider)
     try:
-        return data["choices"]["message"]["content"].strip() if data else None
+        return data["choices"][0]["message"]["content"].strip() if data else None
     except (KeyError, IndexError, TypeError):
         return None
 
@@ -174,7 +120,7 @@ def _ask_gemini(key: str, prompt: str, system: str, temp: float, max_tokens: int
         data = _post(f"{URLS['gemini']}{model}:generateContent?key={key}", payload, tag=f"gemini:{model}")
         try:
             if data:
-                return data["candidates"]["content"]["parts"]["text"].strip()
+                return data["candidates"][0]["content"]["parts"][0]["text"].strip()
         except (KeyError, IndexError, TypeError):
             continue
     return None
@@ -185,7 +131,7 @@ def _ask_cohere(key: str, prompt: str, system: str, temp: float, max_tokens: int
     payload = {"model": "command-a-03-2025", "messages": _messages(prompt, system), "temperature": temp, "max_tokens": max_tokens}
     data = _post(URLS["cohere"], payload, headers, "cohere")
     try:
-        return data["message"]["content"]["text"].strip() if data else None
+        return data["message"]["content"][0]["text"].strip() if data else None
     except (KeyError, IndexError, TypeError):
         return None
 
@@ -266,18 +212,17 @@ def ai_vision(image_bytes: bytes, mime_type: str, prompt: str, system: str = "")
             data = _post(f"{URLS['gemini']}{model}:generateContent?key={key}", payload, tag=f"vision:{model}")
             try:
                 if data:
-                    return data["candidates"]["content"]["parts"]["text"].strip()
+                    return data["candidates"][0]["content"]["parts"][0]["text"].strip()
             except (KeyError, IndexError, TypeError):
                 continue
     return None
 
 
 def ai_generate_image(prompt: str) -> Optional[bytes]:
-    """توليد الصور والرسوم التوضيحية عبر Cloudflare Flux مع بديل احتياطي"""
     en_prompt = ai_ask(
         f"Convert this description into a clean, professional English image prompt (max 40 words, no extra text): {prompt}",
         mode="fast",
-        use_cache=False
+        use_cache=False,
     )
     if CF_ACCOUNT and CF_TOKEN:
         url = f"https://cloudflare.com{CF_ACCOUNT}/ai/run/@cf/black-forest-labs/flux-1-schnell"
@@ -294,3 +239,20 @@ def ai_ask_json(prompt: str, system: str = "", mode: str = "fast") -> dict[str, 
     strict_system = f"{system}\nأجب بصيغة JSON صالحة فقط بدون أي نص إضافي أو علامات Markdown.".strip()
     raw = ai_ask(prompt, system=strict_system, temperature=0.1, mode=mode, use_cache=False)
     match = re.search(r"\{.*\}", raw, re.DOTALL)
+    cleaned = match.group(0) if match else raw.replace("```json", "").replace("```", "").strip()
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        return {"raw_response": raw, "parse_error": True}
+
+
+def check_providers_health() -> dict[str, bool]:
+    return {
+        "gemini": bool(GEM_KEYS),
+        "groq": bool(GROQ_KEYS),
+        "samba": bool(SAMBA_KEYS),
+        "cohere": bool(COHERE_KEYS),
+        "openrouter": bool(OR_KEYS),
+        "cloudflare": bool(CF_ACCOUNT and CF_TOKEN),
+        "supabase": bool(SB_URL and SB_KEY),
+    }

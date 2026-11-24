@@ -90,8 +90,6 @@ def _handle_board_post(board: dict[str, Any], cols: list[str], rows: list[list[A
             return ai_data.get("cols", cols), ai_data["rows"], f"✅ {ai_data.get('reply', 'تم تحديث البيانات بنجاح.')}"
         return cols, rows, "⚠️ تعذر معالجة التعديل حالياً، يرجى المحاولة مرة أخرى."
     return cols, rows, ""
-
-
 def _extract_chart_metrics(rows: list[list[Any]]) -> tuple[list[str], list[float], float, float]:
     labels = [str(next(iter(r), "")) for r in rows[:12] if r]
     values: list[float] = []
@@ -109,6 +107,8 @@ def _extract_chart_metrics(rows: list[list[Any]]) -> tuple[list[str], list[float
     avg_val = round(sum(values) / len(values), 1) if values else 0.0
     max_val = max(values) if values else 0.0
     return labels, values, avg_val, max_val
+
+
 @app.route("/board/<int:bid>", methods=["GET", "POST"])
 def live_board(bid: int):
     record = _get_record(bid)
@@ -182,8 +182,6 @@ def live_board(bid: int):
         }});
       </script>
     </body></html>"""
-
-
 @app.route("/board/<int:bid>/export")
 def export_board(bid: int):
     record = _get_record(bid)
@@ -200,6 +198,8 @@ def export_board(bid: int):
     wb.save(buf)
     buf.seek(0)
     return send_file(buf, as_attachment=True, download_name=f"Dashboard_{bid}.xlsx")
+
+
 @app.route("/site/<int:sid>", methods=["GET", "POST"])
 def live_site(sid: int):
     record = _get_record(sid)
@@ -310,14 +310,14 @@ HELP_MENU = (
     "8️⃣ *الموارد البشرية والتوظيف:* اكتب (وصف وظيفي أو فرز سير ذاتية أو حقيبة تدريبية لـ...)\n"
     "9️⃣ *الهندسة والعقارات والمالية (ZATCA):* اكتب (جدوى عقارية أو حساب كميات أو عرض سعر ضريبي لـ...)\n"
     "🔟 *العقود والقانون السعودي والحوكمة:* اكتب (صياغة عقد أو خطاب رسمي أو محضر اجتماع لـ...)\n"
-    "1️⃣1️⃣ *الصوتيات والتقارير الزمنية:* اكتب (اقرأ بصوت: النص) أو (تقرير الأداء)\n\n"
+    "1️⃣1️⃣ *الصوتيات والتقارير الزمنية:* اكتب (اقرأ بصوت: النص) أو (لوحة قياس الإنتاجية)\n\n"
     "✨ *التخصيص والتطوير الآمن:*\n"
     "• لحفظ قاعدة دائمة لأسلوبك: ابدأ رسالتك بـ *(قاعدة: ...)* أو *(ملاحظة: ...)*\n"
     "• لتعديل آخر مخرج فوراً: اكتب *(تعديل: ملاحظتك هنا)*\n"
     "• لفحص وتطوير النظام: اكتب *(اقترح تطوير)*"
 )
 def _digits(jid: str) -> str:
-    return "".join(filter(str.isdigit, str(jid or "").split("@", 1)[0]))
+    return "".join(filter(str.isdigit, str(jid or "").split("@", 1)))
 
 
 def _is_owner(cid: str, sender: str) -> bool:
@@ -370,16 +370,12 @@ def _handle_admin_commands(cid: str, clean: str) -> bool:
     return False
 
 
-def _dispatch_smart(cid: str, txt: str, sname: str, is_admin: bool = False) -> None:
+def _dispatch_smart(cid: str, txt: str, sname: str, is_admin: bool = False, from_voice: bool = False) -> None:
     clean = txt.strip()
     user_tag = sname.strip() if sname and sname.strip() != "User" else ("admin" if is_admin else "partner")
 
     if any(k in clean for k in ("القائمة", "المساعدة", "الخدمات", "/help", "قدراتك", "ايش تقدر تسوي", "وش تقدر تسوي")):
         send_msg(cid, HELP_MENU)
-        return
-
-    if clean in ("تقرير الأداء", "قياس الأداء", "kpi"):
-        safe_run(make_kpi, cid)
         return
 
     if is_admin and _handle_admin_commands(cid, clean):
@@ -401,6 +397,13 @@ def _dispatch_smart(cid: str, txt: str, sname: str, is_admin: bool = False) -> N
             return
 
     LAST_TASK[cid] = clean
+    low_clean = clean.lower()
+
+    explicit_doc = any(low_clean.startswith(p) for p in ("صمم", "انشئ", "أنشئ", "سوي", "اعمل", "اكتب تقرير", "ملف وورد", "تقرير وورد", "لوحة", "عرض"))
+    if from_voice and not explicit_doc:
+        EXECUTOR.submit(safe_run, run_task, cid, clean, user_tag, sname)
+        return
+
     sub_tasks = [t.strip() for t in clean.splitlines() if len(t.strip()) > 3 and not t.strip().startswith("[تعديل")]
     multi_map = [
         (("وورد",), "تقرير وورد"),
@@ -410,12 +413,12 @@ def _dispatch_smart(cid: str, txt: str, sname: str, is_admin: bool = False) -> N
         (("باور بي",), "لوحة باور بي اي حية"),
         (("موقع",), "صمم موقع"),
     ]
-    if len(sub_tasks) == 1 and (" و" in clean) and sum(any(k in clean.lower() for k in keys) for keys, _ in multi_map) >= 2:
+    if len(sub_tasks) == 1 and (" و" in clean) and sum(any(k in low_clean for k in keys) for keys, _ in multi_map) >= 2:
         topic = clean.split("عن ", 1)[-1] if "عن " in clean else clean
-        sub_tasks = [f"{prefix} عن {topic}" for keys, prefix in multi_map if any(k in clean.lower() for k in keys)]
-
+        sub_tasks = [f"{prefix} عن {topic}" for keys, prefix in multi_map if any(k in low_clean for k in keys)]
     task_routes = [
-        (("لوحة باور بي", "باور بي اي حية", "باور بي أي حية", "live power bi", "لوحة حية"), lambda t: safe_run(make_live_powerbi, cid, t)),
+        (("لوحة حية", "لوحة تحكم", "قياس الإنتاجية", "قياس الانتاجية", "موقع للوحة", "موقع لوحة", "لوحة إنتاجية", "لوحة انتاجية", "لوحة باور بي", "باور بي اي حية", "live power bi"), lambda t: safe_run(make_live_powerbi, cid, t)),
+        (("تقرير الأداء", "قياس الأداء", "kpi"), lambda t: safe_run(make_kpi, cid)),
         (("دليل باور بي", "هندسة باور بي", "dax"), lambda t: safe_run(_run_with_tip, make_powerbi_kit, cid, t)),
         (("pdf", "بي دي اف"), lambda t: safe_run(_run_with_tip, make_pdf_report, cid, t)),
         (("لوحة اكسل", "لوحة إكسل", "ملف اكسل", "ملف إكسل", "excel"), lambda t: safe_run(_run_with_tip, make_excel, cid, t)),
@@ -427,7 +430,7 @@ def _dispatch_smart(cid: str, txt: str, sname: str, is_admin: bool = False) -> N
     ]
     for task in (sub_tasks or [clean])[:4]:
         low = task.lower()
-        if any(k in low for k in ("تقرير وورد", "ملف وورد", "word", "بحث علمي", "بحث أكاديمي", "بحث اكاديمي", "دراسة علمية")) and not any(k in low for k in ("باور بي", "power bi")):
+        if any(k in low for k in ("تقرير وورد", "ملف وورد", "word", "بحث علمي", "بحث أكاديمي", "بحث اكاديمي", "دراسة علمية")) and not any(k in low for k in ("باور بي", "power bi", "لوحة")):
             EXECUTOR.submit(safe_run, _run_with_tip, make_word, cid, task)
             continue
 
@@ -503,7 +506,7 @@ def _handle_media_message(cid: str, mdata: dict[str, Any], sname: str, is_admin:
     if mime.startswith("audio/"):
         if transcript := transcribe_voice_note(dl_url):
             send_msg(cid, f"🎙 *تم تفريغ الرسالة الصوتية:*\n«{transcript}»")
-            _dispatch_smart(cid, transcript, sname, is_admin)
+            _dispatch_smart(cid, transcript, sname, is_admin, from_voice=True)
         else:
             send_msg(cid, "⚠️ تعذر فهم الرسالة الصوتية، يرجى إعادة الإرسال.")
         return

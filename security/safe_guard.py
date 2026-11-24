@@ -8,6 +8,9 @@ from typing import Any
 from core.core_ai import sb, send_msg
 
 ADMIN_PHONE = "".join(filter(str.isdigit, os.environ.get("ADMIN_PHONE", "")))
+AHMED_PHONE = "".join(filter(str.isdigit, os.environ.get("AHMED_PHONE", "")))
+ALLOWED_GROUP = os.environ.get("ALLOWED_GROUP", "").strip()
+
 _RATE_TRACKER: dict[str, list[float]] = {}
 _STRIKE_COUNT: dict[str, int] = {}
 _BLACKLIST: set[str] = set()
@@ -26,16 +29,24 @@ SAUDI_RESTRICTED_PATTERNS = [
 ]
 
 
-def _is_admin(cid: str) -> bool:
-    if not cid or not ADMIN_PHONE:
+def _match_phone(cid: str, target_digits: str) -> bool:
+    if not cid or not target_digits:
         return False
-    digits = "".join(filter(str.isdigit, cid.split("@")))
-    if digits == ADMIN_PHONE:
+    digits = "".join(filter(str.isdigit, cid.split("@")[0]))
+    if digits == target_digits:
         return True
-    return len(digits) >= 9 and len(ADMIN_PHONE) >= 9 and digits[-9:] == ADMIN_PHONE[-9:]
+    return len(digits) >= 9 and len(target_digits) >= 9 and digits[-9:] == target_digits[-9:]
 
 
-def check_rate_limit(cid: str, max_per_min: int = 12) -> bool:
+def _is_admin(cid: str) -> bool:
+    if not cid:
+        return False
+    if ALLOWED_GROUP and cid == ALLOWED_GROUP:
+        return True
+    return _match_phone(cid, ADMIN_PHONE) or _match_phone(cid, AHMED_PHONE)
+
+
+def check_rate_limit(cid: str, max_per_min: int = 20) -> bool:
     if _is_admin(cid):
         return True
     if cid in _BLACKLIST:
@@ -95,6 +106,12 @@ def _record_security_strike(cid: str, rule_name: str, snippet: str) -> None:
 def inspect_prompt_injection(text: str, cid: str = "") -> dict[str, Any]:
     if not text:
         return {"is_safe": True, "matched_rule": None}
+
+    # السماح الفوري بأوامر التعديل النظامية للمخرجات
+    stripped = text.strip()
+    if stripped.startswith("تعديل:") or stripped.startswith("تعديل :"):
+        return {"is_safe": True, "matched_rule": None}
+
     if cid in _BLACKLIST and not _is_admin(cid):
         return {"is_safe": False, "matched_rule": "BLACKLISTED_USER"}
     if cid and not check_rate_limit(cid):

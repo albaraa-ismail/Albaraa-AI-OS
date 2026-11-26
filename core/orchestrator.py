@@ -1,8 +1,5 @@
 import time
-import requests
-
-from core.config import GREEN_BASE, GREEN_ID, GREEN_TOKEN
-from core.core_ai import ai_ask
+from core.core_ai import ai_ask, send_msg
 from core.event_bus import BUS
 from intelligence.builder_agent import BuilderAgent
 from intelligence.learning_agent import QualityReviewerAgent
@@ -11,25 +8,13 @@ from intelligence.ml_intent_anomaly import INTENT_CLASSIFIER
 from intelligence.research_agent import ResearchAgent
 from intelligence.rl_router import RL_ROUTER
 from multimodal.arabic_nlp import normalize_arabic_dialect, polish_human_style
+from multimodal.office_tools import make_live_powerbi
 from security.audit_ledger import AUDIT_LEDGER
 from security.iam_gateway import IAM_GATEWAY
 from security.safe_guard import apply_saudi_governance, inspect_prompt_injection
 from security.vault_masking import PII_MASKER
 from telemetry.evolution_engine import log_kpi
 from telemetry.realtime_monitor import MONITOR
-
-
-def send_msg(cid: str, text: str) -> bool:
-    if not (GREEN_ID and GREEN_TOKEN and cid and text):
-        return False
-    chat_id = cid if "@" in cid else f"{cid}@c.us"
-    url = f"{GREEN_BASE}{GREEN_ID}/sendMessage/{GREEN_TOKEN}"
-    try:
-        res = requests.post(url, json={"chatId": chat_id, "message": text}, timeout=15)
-        return res.status_code == 200
-    except Exception as exc:
-        print(f"WA Send Err: {exc}", flush=True)
-        return False
 
 
 class ChiefOrchestrator:
@@ -73,6 +58,15 @@ class ChiefOrchestrator:
 
             masked_msg, pii_map = PII_MASKER.mask(raw_msg)
             normalized = normalize_arabic_dialect(masked_msg)
+            low_norm = normalized.lower()
+
+            # توجيه مباشر لبناء لوحة تحكم تفاعلية حية إذا طُلبت داخل المحادثة
+            if notify_whatsapp and any(k in low_norm for k in ("لوحة تحكم", "لوحة بيانات", "لوحه تحكم", "داشبورد", "dashboard")):
+                make_live_powerbi(cid, normalized)
+                elapsed = time.time() - t0
+                log_kpi(session["role"], "orchestrator:live_dashboard", elapsed, "dashboard")
+                MONITOR.record_end("chief_orchestrator", elapsed, success=True)
+                return "✅ تم إنشاء لوحة التحكم التفاعلية الحية وإرسال رابطها."
 
             ml_pred = INTENT_CLASSIFIER.predict(normalized)
             intent = ml_pred.get("intent", "general")
@@ -83,22 +77,24 @@ class ChiefOrchestrator:
             chosen_agent = RL_ROUTER.select_agent(intent, candidates)
 
             memory_ctx = get_context(session["tenant_id"], normalized)
-            plan = self.build_execution_plan(normalized, intent) if len(normalized) > 250 else ""
+            contextual_task = f"{normalized}\n\nسياق المحادثات السابقة:\n{memory_ctx}" if memory_ctx else normalized
+            plan = self.build_execution_plan(normalized, intent) if len(normalized) > 200 else ""
 
             if chosen_agent == "research" or intent == "research":
-                raw_answer = self.researcher.deep_research(normalized)
+                raw_answer = self.researcher.deep_research(contextual_task)
             elif chosen_agent == "code" or intent == "code":
                 raw_answer = self.builder.build_solution(normalized, context=memory_ctx)
             else:
                 sys_prompt = (
-                    "أنت العقل المدبر ومساعد الأعمال والبحث والتقنية في Albaraa-AI-OS. "
-                    "أجب باللغة العربية الفصحى بأسلوب بشري واضح ومباشر ومنظم دون مقدمات آلية."
+                    "أنت العقل المدبر ومساعد الأعمال والبحث والتقنية في منظومة Albaraa-AI-OS. "
+                    "نفّذ طلب المستخدم مباشرة بأعلى جودة واحترافية باللغة العربية، مع أمثلة عملية وجداول منظمة. "
+                    "إذا طلب المستخدم تنفيذ شيء نوقش سابقاً (مثل 'أنشئها الآن' أو 'نفذها')، فاعتمد على سياق المحادثات السابقة ونفذه فوراً دون طلب تفاصيل إضافية."
                     + (f"\n\n{memory_ctx}" if memory_ctx else "")
                 )
                 prompt_body = f"خطة التنفيذ:\n{plan}\n\nالطلب:\n{normalized}" if plan else normalized
-                raw_answer = ai_ask(prompt_body, sys_prompt, temperature=0.35, mode="arabic")
+                raw_answer = ai_ask(prompt_body, sys_prompt, temperature=0.35, mode="arabic", max_tokens=3000)
 
-            if intent != "code" and len(raw_answer) > 550:
+            if intent != "code" and len(raw_answer) > 900:
                 raw_answer = self.reviewer.review_and_refine(normalized, raw_answer)
 
             styled = raw_answer if intent == "code" else polish_human_style(raw_answer)

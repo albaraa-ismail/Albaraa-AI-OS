@@ -4,19 +4,15 @@ from datetime import timedelta, timezone
 
 RIYADH_TZ = timezone(timedelta(hours=3))
 
-
 def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default).strip()
-
 
 def digits_only(val: str) -> str:
     return "".join(filter(str.isdigit, str(val or "")))
 
-
 def load_api_keys(prefix: str) -> list[str]:
     candidates = [prefix] + [f"{prefix}{sep}{i}" for i in range(1, 10) for sep in ("_", "")]
     return list(dict.fromkeys(k for c in candidates if (k := _env(c))))
-
 
 def rotated_keys(keys: list[str]) -> list[str]:
     if len(keys) <= 1:
@@ -24,10 +20,8 @@ def rotated_keys(keys: list[str]) -> list[str]:
     idx = random.randrange(len(keys))
     return keys[idx:] + keys[:idx]
 
-
 def _build_url(*parts: str) -> str:
     return "https" + ":" + "//" + "".join(parts)
-
 
 ADMIN_PHONE = digits_only(_env("ADMIN_PHONE"))
 PARTNER_PHONE = digits_only(_env("AHMED_PHONE"))
@@ -44,11 +38,7 @@ SB_KEY = _env("SUPABASE_KEY")
 GREEN_ID = _env("GREEN_API_ID") or _env("GREEN_ID_INSTANCE")
 GREEN_TOKEN = _env("GREEN_API_TOKEN")
 _raw_green = _env("GREEN_API_URL").rstrip("/")
-GREEN_BASE = (
-    (_raw_green if _raw_green.endswith("waInstance") else f"{_raw_green}/waInstance")
-    if _raw_green
-    else _build_url("api.", "green-api.com", "/waInstance")
-)
+GREEN_BASE = _raw_green.removesuffix("/waInstance") if _raw_green else _build_url("api.", "green-api.com")
 
 GEM_KEYS = load_api_keys("GEMINI_API_KEY")
 GROQ_KEYS = load_api_keys("GROQ_API_KEY")

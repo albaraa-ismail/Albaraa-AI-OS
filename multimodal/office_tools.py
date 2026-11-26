@@ -6,9 +6,8 @@ from typing import Any
 import pendulum
 from hijridate import Gregorian
 from core.config import RENDER_URL
-from core.core_ai import SESSION, ai_ask, ai_ask_json, sb
+from core.core_ai import SESSION, ai_ask, ai_ask_json, ai_generate_image, sb, send_msg
 from core.event_bus import BUS
-from core.orchestrator import send_msg
 from multimodal.pro_capabilities import send_file
 
 MIME = {
@@ -40,6 +39,15 @@ def _detect_font(msg: str) -> str:
 
 
 def _fetch_visual(query: str, out_path: str) -> str:
+    try:
+        ai_img = ai_generate_image(f"Professional executive corporate illustration, clean modern design: {query}")
+        if ai_img and len(ai_img) > 5000:
+            with open(out_path, "wb") as f:
+                f.write(ai_img)
+            return out_path
+    except Exception:
+        pass
+
     en_q = ai_ask(query, "2 simple English keywords for image search. Keywords only:", mode="fast").strip()
     clean_words = re.sub(r"[^a-zA-Z0-9\s]", "", en_q).strip() or "business strategy"
     try:
@@ -108,6 +116,8 @@ def _drop(*paths: str) -> None:
                 os.remove(p)
             except OSError:
                 pass
+
+
 def make_kpi(cid: str) -> None:
     import openpyxl
 
@@ -125,8 +135,6 @@ def make_kpi(cid: str) -> None:
     _drop(path)
     del wb
     gc.collect()
-
-
 def _build_word_doc(
     cid: str,
     title: str,
@@ -211,14 +219,16 @@ def _build_word_doc(
                 pc.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 pc.add_run().add_picture(chart_img, width=Inches(5.8))
 
-    if table_rows and len(table_rows) > 1:
+    if table_rows and len(table_rows) > 1 and isinstance(table_rows, list):
         _add(doc, "📊 جدول المؤشرات والمقارنات التنفيذية", 15, True, (11, 25, 44), 12, 6)
-        tbl_d = doc.add_table(rows=len(table_rows), cols=len(table_rows))
+        num_cols = len(table_rows)
+        tbl_d = doc.add_table(rows=len(table_rows), cols=num_cols)
         tbl_d.style = "Table Grid"
         for ri, row_vals in enumerate(table_rows):
             bg = "0B192C" if ri == 0 else ("F8FAFC" if ri % 2 == 0 else "FFFFFF")
             fg = (255, 209, 102) if ri == 0 else (15, 23, 42)
-            for ci, val in enumerate(row_vals):
+            for ci in range(num_cols):
+                val = row_vals[ci] if ci < len(row_vals) else ""
                 cell = tbl_d.cell(ri, ci)
                 cell._tc.get_or_add_tcPr().append(parse_xml(f'<w:shd {nsdecls("w")} w:fill="{bg}"/>'))
                 _add(next(iter(cell.paragraphs)), str(val), 11.5, ri == 0 or ci == 0, fg, 2, 2)
@@ -241,11 +251,11 @@ def make_word(cid: str, msg: str) -> None:
         heads = ["الملخص التنفيذي ومشكلة البحث", "الإطار النظري والدراسات السابقة", "منهجية البحث", "النتائج والمناقشة", "الخاتمة والمراجع"]
         sys_p = "اكتب بحثا أكاديميا رصينا بالعربية الفصحى مع ذكر الدراسات السابقة والمراجع بنظام APA:"
     else:
-        out = ai_ask(msg, "ضع 5 محاور استراتيجية لتغطية الموضوع. كل محور في سطر بدون مقدمات:", mode="arabic")
+        out = ai_ask(msg, "ضع 5 محاور استراتيجية لتغطية الموضوع. كل محور في سطر بدون مقدمات:", mode="office")
         heads = [re.sub(r"^[\-\*\#\d\.\s]+", "", s).strip() for s in out.split("\n") if len(s.strip()) > 3][:5] or ["الإطار العام", "التحليل", "التنفيذ", "المؤشرات", "التوصيات"]
         sys_p = "اكتب تحليلا تنفيذيا منظما بالعربية الفصحى في نقاط واضحة تبدأ بـ (▪):"
-    sections = [(h, ai_ask(f"الموضوع: {title}\nالمحور: {h}\nالتفاصيل: {msg}", sys_p, mode="arabic")) for h in heads]
-    vis = ai_ask_json(f"للموضوع: {title}\n" + 'أرجع JSON فقط لرسم بياني وجدول: {"chart_title": "عنوان الرسم", "labels": ["بند1", "بند2", "بند3", "بند4"], "values":, "table": [["المعيار", "القيمة الحالية", "المستهدف"], ["بند 1", "85%", "95%"], ["بند 2", "92%", "98%"], ["بند 3", "78%", "90%"]]}', "محلل بيانات.", mode="fast") or {}
+    sections = [(h, ai_ask(f"الموضوع: {title}\nالمحور: {h}\nالتفاصيل: {msg}", sys_p, mode="office")) for h in heads]
+    vis = ai_ask_json(f"للموضوع: {title}\n" + 'أرجع JSON فقط لرسم بياني وجدول: {"chart_title": "عنوان الرسم", "labels": ["بند1", "بند2", "بند3", "بند4"], "values":, "table": [["المعيار", "القيمة الحالية", "المستهدف"], ["بند 1", "85%", "95%"], ["بند 2", "92%", "98%"], ["بند 3", "78%", "90%"]]}', "محلل بيانات.", mode="office") or {}
     chart_d = {"title": vis.get("chart_title", title), "labels": vis.get("labels", []), "values": vis.get("values", [])}
     _build_word_doc(cid, title, "دراسة علمية محكمة" if is_ac else "تقرير تحليلي وتنفيذي", sections, _detect_font(msg), f"📄 تم إصدار الوثيقة المدعومة بالصور والرسوم البيانية: *{title}*", "office.word_exported", with_cover=True, chart_data=chart_d, table_rows=vis.get("table"))
 def make_excel(cid: str, msg: str) -> None:
@@ -269,7 +279,7 @@ def make_excel(cid: str, msg: str) -> None:
         "3: ملخص تنفيذي من 3 توصيات استراتيجية بدون رموز نجمية.\n"
         "التزم بالفصل بـ === بدون مقدمات."
     )
-    res = ai_ask(msg, prompt, mode="fast")
+    res = ai_ask(msg, prompt, mode="office")
     p1, p2, p3 = ([p.strip() for p in res.split("===") if p.strip()] + ["", "", ""])[:3]
     title = p1.replace('"', "").strip()[:55] if (p1 and len(p1) < 85 and "|" not in p1) else "تقرير تقييم الأداء والكفاءة"
     summary = p3 or "1. تعزيز برامج التطوير المهني للوحدات دون المستهدف.\n2. ربط الحوافز الفصلية بمؤشرات الإنجاز الفعلية.\n3. تعميم أفضل الممارسات التشغيلية."
@@ -407,7 +417,7 @@ def make_excel(cid: str, msg: str) -> None:
     ws_dash.merge_cells("B27:M27")
     ws_dash["B27"] = "💡 القراءة التحليلية والتوصيات التنفيذية"
     ws_dash["B27"].fill, ws_dash["B27"].font, ws_dash["B27"].alignment = f_navy, Font(color="FFD166", size=12, bold=True), aln_r
-    ws_dash.row_dimensions[28].height = 28
+    ws_dash.row_dimensions.height = 28
     ws_dash.merge_cells("B28:M33")
     ws_dash["B28"] = summary.replace("**", "").replace("###", "").replace("##", "").strip()
     ws_dash["B28"].fill, ws_dash["B28"].font, ws_dash["B28"].border = f_white, Font(color="1E293B", size=11), brd
@@ -435,14 +445,14 @@ def make_pptx(cid: str, msg: str) -> None:
     send_msg(cid, "📊 جاري تصميم العرض التقديمي وتنسيق الشرائح والصور...")
     title = _clean_title(msg)
     prompt = f"أنشئ محتوى عرض تقديمي احترافي حول: {msg}\n" + 'JSON فقط: {"subtitle": "وصف مختصر", "slides": [{"heading": "عنوان", "points": ["نقطة 1", "نقطة 2", "نقطة 3", "نقطة 4"]}]} (6 شرائح بالعربية الفصحى).'
-    data = ai_ask_json(prompt, "مصمم عروض تنفيذية.", mode="arabic") or {
+    data = ai_ask_json(prompt, "مصمم عروض تنفيذية.", mode="office") or {
         "subtitle": "عرض تحليلي واستراتيجي شامل",
         "slides": [{"heading": "نظرة عامة", "points": ["تحديد الأهداف الاستراتيجية", "تحليل الوضع الراهن", "رفع كفاءة الأداء"]}],
     }
 
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
-    blank = prs.slide_layouts[6]
+    blank = prs.slide_layouts
     NAVY, SLATE, GOLD, WHITE, LIGHT, DARK = (
         RGBColor(11, 25, 44),
         RGBColor(30, 62, 98),
@@ -471,12 +481,15 @@ def make_pptx(cid: str, msg: str) -> None:
     _p(tf0, data.get("subtitle", ""), 20, WHITE, sp=14)
     _p(tf0, f"تاريخ الإصدار: {today_dates()}", 14, RGBColor(148, 163, 184), sp=28)
 
+    temp_imgs = []
     slide_img = _fetch_visual(title, f"/tmp/ppt_cover_{uuid.uuid4().hex[:6]}.jpg")
     if slide_img:
+        temp_imgs.append(slide_img)
         try:
             s0.shapes.add_picture(slide_img, Inches(0.8), Inches(4.5), width=Inches(3.2))
         except Exception:
             pass
+
     for idx, sl in enumerate(data.get("slides", [])[:8], 1):
         s = prs.slides.add_slide(blank)
         s.background.fill.solid()
@@ -488,20 +501,32 @@ def make_pptx(cid: str, msg: str) -> None:
             sh.line.fill.background()
         htf = s.shapes.add_textbox(Inches(0.8), Inches(0.25), Inches(11.7), Inches(0.7)).text_frame
         _p(htf, f"{idx}. {sl.get('heading', '')}", 26, GOLD, True, first=True)
-        btf = s.shapes.add_textbox(Inches(1.0), Inches(1.8), Inches(11.3), Inches(4.8)).text_frame
+
+        has_pic = False
+        if idx in (1, 3):
+            s_pic = _fetch_visual(sl.get("heading", title), f"/tmp/ppt_s{idx}_{uuid.uuid4().hex[:6]}.jpg")
+            if s_pic:
+                temp_imgs.append(s_pic)
+                try:
+                    s.shapes.add_picture(s_pic, Inches(0.7), Inches(1.8), width=Inches(4.3))
+                    has_pic = True
+                except Exception:
+                    pass
+
+        box_x, box_w = (Inches(5.3), Inches(7.2)) if has_pic else (Inches(1.0), Inches(11.3))
+        btf = s.shapes.add_textbox(box_x, Inches(1.8), box_w, Inches(4.8)).text_frame
         btf.word_wrap = True
         for pi, pt in enumerate(sl.get("points", [])):
             _p(btf, f"▪ {pt}", 20, DARK, first=(pi == 0))
             btf.paragraphs[pi].space_after = Pt(16)
         ftf = s.shapes.add_textbox(Inches(0.8), Inches(6.9), Inches(11.7), Inches(0.4)).text_frame
         _p(ftf, f"{title}  |  شريحة {idx}", 11, SLATE, align=PP_ALIGN.LEFT, first=True)
-
     fname = re.sub(r"[^\w\s-]", "", title).strip().replace(" ", "_") or "Presentation"
     path = f"/tmp/{fname}_{uuid.uuid4().hex[:6]}.pptx"
     prs.save(path)
     send_file(cid, path, f"{fname}.pptx", MIME["pptx"], f"📽️ تم تصميم العرض التقديمي: *{title}*")
     BUS.publish("office.pptx_exported", {"cid": cid, "title": title})
-    _drop(path, slide_img)
+    _drop(path, *temp_imgs)
     del prs
     gc.collect()
 
@@ -533,7 +558,7 @@ def make_live_powerbi(cid: str, msg: str) -> None:
 
     if not board:
         prompt = f"أنشئ بيانات لوحة قيادة احترافية حول: {msg}\n" + 'JSON فقط: {"title": "عنوان اللوحة", "cols": ["البند", "القسم", "المحقق", "المستهدف", "الحالة"], "rows": [["بند 1", "قسم 1", "95", "100", "ممتاز"]]}'
-        board = ai_ask_json(prompt, "محلل بيانات محترف. أنشئ 6 صفوف بيانات واقعية.", mode="fast")
+        board = ai_ask_json(prompt, "محلل بيانات محترف. أنشئ 6 صفوف بيانات واقعية.", mode="office")
 
     if not isinstance(board, dict) or not board.get("rows"):
         board = {
@@ -556,5 +581,5 @@ def make_live_powerbi(cid: str, msg: str) -> None:
 def make_powerbi_kit(cid: str, msg: str) -> None:
     send_msg(cid, "📈 جاري إعداد نموذج البيانات ومعادلات DAX الاحترافية...")
     title = _clean_title(msg)
-    guide = ai_ask(msg, f"أنت خبير Power BI. للمشروع التالي: {msg}\nاكتب: 1. هيكل الجداول (Fact & Dimension). 2. 6 معادلات DAX جاهزة. 3. تصميم لوحة القيادة:", temperature=0.2, mode="arabic")
+    guide = ai_ask(msg, f"أنت خبير Power BI. للمشروع التالي: {msg}\nاكتب: 1. هيكل الجداول (Fact & Dimension). 2. 6 معادلات DAX جاهزة. 3. تصميم لوحة القيادة:", temperature=0.2, mode="office")
     _build_word_doc(cid, f"دليل هندسة Power BI: {title}", "هندسة البيانات ومعادلات DAX", [("النموذج الهندسي ومعادلات DAX", guide)], _detect_font(msg), f"📈 تم إعداد حزمة هندسة Power BI ومعادلات DAX: *{title}*", "office.powerbi_exported")

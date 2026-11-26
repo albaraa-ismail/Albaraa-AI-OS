@@ -13,28 +13,27 @@ from core.failover_cache import SMART_CACHE, FAILOVER
 from core.event_bus import BUS
 
 SESSION = requests.Session()
-SESSION.headers.update({"User-Agent": "Albaraa-AI-OS/3.2"})
-DEFAULT_TIMEOUT = 45
+SESSION.headers.update({"User-Agent": "Albaraa-AI-OS/3.3"})
+DEFAULT_TIMEOUT = 60
 
 GEMINI_BASE_URL = URLS["gemini"]
 GEM_KEY = GEM_KEYS[0] if GEM_KEYS else ""
 _rotated = rotated_keys
 
 MODE_ROUTING: dict[str, list[str]] = {
-    "arabic": ["gemini", "samba", "groq", "cohere", "openrouter", "cloudflare"],
-    "fast": ["groq", "samba", "gemini", "openrouter", "cloudflare"],
-    "general": ["groq", "gemini", "samba", "openrouter", "cohere", "cloudflare"],
-    "reasoning": ["gemini", "samba", "openrouter", "groq", "cohere"],
-    "coding": ["openrouter", "samba", "gemini", "groq"],
-    "office": ["gemini", "openrouter", "samba", "groq"],
+    "arabic": ["gemini", "groq", "openrouter", "cohere", "cloudflare"],
+    "fast": ["groq", "gemini", "openrouter", "cloudflare"],
+    "general": ["groq", "gemini", "openrouter", "cohere", "cloudflare"],
+    "reasoning": ["gemini", "groq", "openrouter", "cohere"],
+    "coding": ["openrouter", "gemini", "groq"],
+    "office": ["gemini", "groq", "openrouter", "cohere"],
 }
 
-GEMINI_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-3.1-flash-lite")
+GEMINI_MODELS = ("gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.1-flash-lite")
 
 OPENAI_COMPAT: dict[str, tuple[str, str]] = {
-    "groq": (URLS["groq_chat"], "llama-3.3-70b-specdec"),
-    "samba": (URLS["samba"], "Meta-Llama-3.3-70B-Instruct"),
-    "openrouter": (URLS["openrouter"], "qwen/qwen-2.5-coder-32b-instruct:free"),
+    "groq": (URLS["groq_chat"], "llama-3.3-70b-versatile"),
+    "openrouter": (URLS["openrouter"], "openrouter/free"),
 }
 
 KEY_POOLS: dict[str, list[str]] = {
@@ -97,6 +96,8 @@ def _post(url: str, payload: dict[str, Any], headers: Optional[dict[str, str]] =
     except Exception as exc:
         print(f"Conn Err [{tag}]: {exc}", flush=True)
     return None
+
+
 def _ask_openai_compat(provider: str, key: str, prompt: str, system: str, temp: float, max_tokens: int) -> Optional[str]:
     url, model = OPENAI_COMPAT[provider]
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
@@ -124,17 +125,14 @@ def _ask_gemini(key: str, prompt: str, system: str, temp: float, max_tokens: int
         except (KeyError, IndexError, TypeError):
             continue
     return None
-
-
 def _ask_cohere(key: str, prompt: str, system: str, temp: float, max_tokens: int) -> Optional[str]:
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     payload = {"model": "command-a-03-2025", "messages": _messages(prompt, system), "temperature": temp, "max_tokens": max_tokens}
     data = _post(URLS["cohere"], payload, headers, "cohere")
     try:
-        return data["message"]["content"][0]["text"].strip() if data else None
+        return data["message"]["content"]["text"].strip() if data else None
     except (KeyError, IndexError, TypeError):
         return None
-
 
 def _ask_cloudflare(prompt: str, system: str, temp: float) -> Optional[str]:
     if not CF_ACCOUNT or not CF_TOKEN:
@@ -142,7 +140,6 @@ def _ask_cloudflare(prompt: str, system: str, temp: float) -> Optional[str]:
     headers = {"Authorization": f"Bearer {CF_TOKEN}", "Content-Type": "application/json"}
     data = _post(URLS["cloudflare"], {"messages": _messages(prompt, system), "temperature": temp}, headers, "cloudflare")
     return (data.get("result", {}).get("response") or "").strip() or None if data else None
-
 
 def _call_provider(provider: str, prompt: str, system: str, temp: float, max_tokens: int) -> Optional[str]:
     if provider == "cloudflare":
@@ -161,7 +158,6 @@ def _call_provider(provider: str, prompt: str, system: str, temp: float, max_tok
         if res:
             return res
     return None
-
 
 def ai_ask(
     prompt: str,
@@ -195,7 +191,6 @@ def ai_ask(
 
     return "عذراً، جميع محركات الذكاء الاصطناعي مشغولة حالياً. يرجى المحاولة بعد قليل."
 
-
 def ai_vision(image_bytes: bytes, mime_type: str, prompt: str, system: str = "") -> Optional[str]:
     if not GEM_KEYS:
         return None
@@ -212,15 +207,14 @@ def ai_vision(image_bytes: bytes, mime_type: str, prompt: str, system: str = "")
             data = _post(f"{URLS['gemini']}{model}:generateContent?key={key}", payload, tag=f"vision:{model}")
             try:
                 if data:
-                    return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                    return data["candidates"]["content"]["parts"]["text"].strip()
             except (KeyError, IndexError, TypeError):
                 continue
     return None
 
-
 def ai_generate_image(prompt: str) -> Optional[bytes]:
     en_prompt = ai_ask(
-        f"Convert this description into a clean, professional English image prompt (max 40 words, no extra text): {prompt}",
+        f"Convert this description into a clean, professional English image prompt (max 35 words, no extra text): {prompt}",
         mode="fast",
         use_cache=False,
     )
@@ -233,8 +227,16 @@ def ai_generate_image(prompt: str) -> Optional[bytes]:
                 return res.content
         except Exception as exc:
             print(f"CF Image Err: {exc}", flush=True)
-    return None
 
+    try:
+        encoded = requests.utils.quote(en_prompt)
+        fallback_base = "".join(["https://", "image.", "pollinations.ai", "/prompt/"])
+        res = SESSION.get(f"{fallback_base}{encoded}?width=1024&height=1024&nologo=true", timeout=45)
+        if res.status_code == 200 and res.content:
+            return res.content
+    except Exception as exc:
+        print(f"Fallback Image Err: {exc}", flush=True)
+    return None
 
 def ai_ask_json(prompt: str, system: str = "", mode: str = "fast") -> dict[str, Any]:
     strict_system = f"{system}\nأجب بصيغة JSON صالحة فقط بدون أي نص إضافي أو علامات Markdown.".strip()
@@ -245,7 +247,6 @@ def ai_ask_json(prompt: str, system: str = "", mode: str = "fast") -> dict[str, 
         return json.loads(cleaned)
     except Exception:
         return {"raw_response": raw, "parse_error": True}
-
 
 def check_providers_health() -> dict[str, bool]:
     return {

@@ -4,15 +4,32 @@ from datetime import timedelta, timezone
 
 RIYADH_TZ = timezone(timedelta(hours=3))
 
+
 def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default).strip()
+
 
 def digits_only(val: str) -> str:
     return "".join(filter(str.isdigit, str(val or "")))
 
+
 def load_api_keys(prefix: str) -> list[str]:
-    candidates = [prefix] + [f"{prefix}{sep}{i}" for i in range(1, 10) for sep in ("_", "")]
-    return list(dict.fromkeys(k for c in candidates if (k := _env(c))))
+    short = prefix.replace("_API_KEY", "_KEY")
+    base_names = [prefix, f"{prefix}S", short, f"{short}S"]
+    candidates = list(base_names)
+    for base in base_names:
+        candidates.extend([f"{base}{sep}{i}" for i in range(1, 20) for sep in ("_", "")])
+
+    found: list[str] = []
+    for c in candidates:
+        raw = _env(c)
+        if raw:
+            for item in raw.replace("\n", ",").split(","):
+                clean_k = item.strip()
+                if clean_k and clean_k not in found:
+                    found.append(clean_k)
+    return found
+
 
 def rotated_keys(keys: list[str]) -> list[str]:
     if len(keys) <= 1:
@@ -20,8 +37,10 @@ def rotated_keys(keys: list[str]) -> list[str]:
     idx = random.randrange(len(keys))
     return keys[idx:] + keys[:idx]
 
+
 def _build_url(*parts: str) -> str:
     return "https" + ":" + "//" + "".join(parts)
+
 
 ADMIN_PHONE = digits_only(_env("ADMIN_PHONE"))
 PARTNER_PHONE = digits_only(_env("AHMED_PHONE"))

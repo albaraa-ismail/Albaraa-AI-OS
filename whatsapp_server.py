@@ -36,13 +36,16 @@ EXECUTOR = ThreadPoolExecutor(max_workers=6)
 SEEN: set[str] = set()
 LAST_TASK: dict[str, str] = {}
 
+
 def _cdn(*parts: str) -> str:
     return "https" + ":" + "//" + "".join(parts)
+
 
 TW_CDN = _cdn("cdn.", "tailwindcss.com")
 CH_CDN = _cdn("cdn.", "jsdelivr.net", "/npm/chart.js")
 GF_CDN = _cdn("fonts.", "googleapis.com", "/css2?family=Cairo:wght@400;600;700&display=swap")
 start_scheduler()
+
 
 def _mark_seen(mid: str) -> bool:
     if not mid:
@@ -54,10 +57,12 @@ def _mark_seen(mid: str) -> bool:
     SEEN.add(mid)
     return False
 
+
 def _get_record(record_id: int) -> Optional[dict[str, Any]]:
     res = sb("GET", "self_learning_logs", q=f"?id=eq.{record_id}")
     rec = next(iter(res), None) if isinstance(res, list) else res
     return rec if isinstance(rec, dict) else None
+
 
 def _handle_board_post(board: dict[str, Any], cols: list[str], rows: list[list[Any]]) -> tuple[list[str], list[list[Any]], str]:
     act = request.form.get("action")
@@ -88,6 +93,7 @@ def _handle_board_post(board: dict[str, Any], cols: list[str], rows: list[list[A
         return cols, rows, "⚠️ تعذر معالجة التعديل حالياً، يرجى المحاولة مرة أخرى."
     return cols, rows, ""
 
+
 def _extract_chart_metrics(rows: list[list[Any]]) -> tuple[list[str], list[float], float, float]:
     labels = [str(next(iter(r), "")) for r in rows[:12] if r]
     values: list[float] = []
@@ -105,6 +111,8 @@ def _extract_chart_metrics(rows: list[list[Any]]) -> tuple[list[str], list[float
     avg_val = round(sum(values) / len(values), 1) if values else 0.0
     max_val = max(values) if values else 0.0
     return labels, values, avg_val, max_val
+
+
 @app.route("/board/<int:bid>", methods=["GET", "POST"])
 def live_board(bid: int):
     record = _get_record(bid)
@@ -179,6 +187,7 @@ def live_board(bid: int):
       </script>
     </body></html>"""
 
+
 @app.route("/board/<int:bid>/export")
 def export_board(bid: int):
     record = _get_record(bid)
@@ -196,6 +205,7 @@ def export_board(bid: int):
     buf.seek(0)
     return send_file(buf, as_attachment=True, download_name=f"Dashboard_{bid}.xlsx")
 
+
 @app.route("/site/<int:sid>", methods=["GET", "POST"])
 def live_site(sid: int):
     record = _get_record(sid)
@@ -209,7 +219,7 @@ def live_site(sid: int):
             "أنت مطور واجهات ويب محترف. عدل كود HTML/CSS/JS التالي بناء على طلب المستخدم وأرجع الكود الكامل الصالح للعرض مباشرة بدون أي مقدمات أو علامات markdown.",
             mode="coding",
             use_cache=False,
-        )
+        ) or ""
         clean_html = updated.replace("```html", "").replace("```", "").strip()
         if any(tag in clean_html.lower() for tag in ("<html", "<body", "<div")):
             html_code = apply_saudi_governance("موقع", clean_html)
@@ -229,42 +239,38 @@ def live_site(sid: int):
     )
     return f"{html_code}\n{edit_bar}"
 
+
 @app.route("/timeline", methods=["GET"])
 def performance_timeline():
     kpis = sb("GET", "telemetry_kpis", q="?order=id.desc&limit=30") or []
-    logs = sb("GET", "self_learning_logs", q="?order=id.desc&limit=20") or []
     rows_html = "".join(
-        f"<tr class='border-b border-slate-800'><td class='p-3'>{k.get('user_role','-')}</td><td class='p-3'>{k.get('unit_used','-')}</td>"
-        f"<td class='p-3 text-emerald-400'>{k.get('response_time_sec',0)} ث</td><td class='p-3 text-sky-400'>{k.get('user_growth_score',95)}%</td></tr>"
+        f"<tr class='border-b border-slate-800'><td class='p-3'>{k.get('id', '')}</td><td class='p-3'>{k.get('user_role', '')}</td>"
+        f"<td class='p-3'>{k.get('unit_used', '')}</td><td class='p-3'>{k.get('response_time_sec', '')}s</td>"
+        f"<td class='p-3'>{k.get('user_growth_score', '')}%</td></tr>"
         for k in kpis if isinstance(k, dict)
     )
-    notes_html = "".join(
-        f"<li class='p-2 bg-slate-950/60 rounded-lg border border-slate-800 text-xs text-slate-300'>{str(l.get('lesson_learned',''))[:140]}</li>"
-        for l in logs if isinstance(l, dict) and l.get("user_role") not in ("live_board", "live_site")
-    )
-    return f"""<!DOCTYPE html><html dir='rtl' lang='ar'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
-    <title>المسار الزمني لتطور الأداء</title><script src='{TW_CDN}'></script><link href='{GF_CDN}' rel='stylesheet'>
-    <style>body{{font-family:'Cairo',sans-serif;background:#0b1120;color:#f8fafc}}</style></head>
-    <body class='p-6 max-w-6xl mx-auto'><h1 class='text-2xl font-bold text-amber-400 mb-6'>📈 المسار الزمني لقياس الجودة وتطور أداء المستخدمين</h1>
-      <div class='grid grid-cols-1 lg:grid-cols-3 gap-6'>
-        <div class='lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden'>
-          <table class='w-full text-right'><thead class='bg-slate-950 text-slate-400 text-xs'><tr><th class='p-3'>المستخدم</th><th class='p-3'>المهمة</th><th class='p-3'>سرعة الإنجاز</th><th class='p-3'>مؤشر الجودة</th></tr></thead><tbody>{rows_html}</tbody></table>
-        </div>
-        <div class='bg-slate-900 border border-slate-800 rounded-2xl p-4'><h3 class='font-bold text-sky-400 mb-3'>🧠 سجل التعلم والتفضيلات</h3><ul class='space-y-2'>{notes_html}</ul></div>
-      </div>
-    </body></html>"""
-
+    return f"""<!DOCTYPE html><html dir='rtl' lang='ar'><head><meta charset='utf-8'><title>سجل الأداء</title>
+    <script src='{TW_CDN}'></script><link href='{GF_CDN}' rel='stylesheet'></head>
+    <body style="font-family:'Cairo',sans-serif" class='bg-slate-950 text-white p-6 max-w-6xl mx-auto'>
+    <h1 class='text-2xl font-bold mb-6 text-sky-400'>⏱️ السجل الزمني لقياس الأداء والجودة</h1>
+    <div class='bg-slate-900 border border-slate-800 rounded-2xl overflow-x-auto'>
+    <table class='w-full text-right'><thead class='bg-slate-950 text-slate-300 text-xs'>
+    <tr><th class='p-3'>#</th><th class='p-3'>المستخدم</th><th class='p-3'>الوحدة</th><th class='p-3'>الزمن</th><th class='p-3'>الجودة</th></tr>
+    </thead><tbody>{rows_html}</tbody></table></div></body></html>"""
 @app.route("/health", methods=["GET"])
 def health_check():
     return jsonify({"status": "healthy", "audit_chain": AUDIT_LEDGER.verify_integrity()}), 200
+
 
 @app.route("/api/telemetry", methods=["GET"])
 def api_telemetry():
     return jsonify({"telemetry": MONITOR.snapshot(), "fleet": ROBOTICS_BRIDGE.fleet_status()}), 200
 
+
 @app.route("/api/benchmark", methods=["GET"])
 def api_benchmark():
     return jsonify(run_benchmark_suite()), 200
+
 
 @app.route("/api/chat", methods=["POST"])
 def api_web_chat():
@@ -272,6 +278,7 @@ def api_web_chat():
     msg = str(body.get("message", "")).strip()
     uid = str(body.get("user_id", "web_guest")).strip()
     return (jsonify({"reply": run_task(f"web_{uid}", msg, "trainee", uid, notify_whatsapp=False)}), 200) if msg else (jsonify({"error": "empty_message"}), 400)
+
 
 @app.route("/api/robotics", methods=["POST"])
 def api_robotics():
@@ -281,9 +288,11 @@ def api_robotics():
         return jsonify(ROBOTICS_BRIDGE.dispatch_command("api_operator", dev, body["command"], body.get("params"))), 200
     return jsonify(ROBOTICS_BRIDGE.register_telemetry(dev, body)), 200
 
+
 @app.route("/", methods=["GET"])
 def home():
     return "System Online", 200
+
 
 HELP_MENU = (
     "📌 *الخدمات والقدرات المتكاملة (58 قدرة تنفيذية وحاكمة):*\n\n"
@@ -304,15 +313,20 @@ HELP_MENU = (
     "• لفحص وتطوير النظام: اكتب *(اقترح تطوير)*"
 )
 
+
 def _digits(jid: str) -> str:
     return "".join(filter(str.isdigit, str(jid or "").split("@", 1)))
+
+
 def _is_owner(cid: str, sender: str) -> bool:
     owner = ADMIN_PHONE or "966575475336"
     c_num, s_num = _digits(cid), _digits(sender)
     return any(n == owner or (len(owner) >= 9 and n.endswith(owner[-9:])) for n in (c_num, s_num) if n)
 
+
 def _is_in_allowed_group(cid: str) -> bool:
     return bool(ALLOWED_GROUP and cid and (cid == ALLOWED_GROUP or ALLOWED_GROUP in cid))
+
 
 def _is_authorized(cid: str, sender: str) -> bool:
     if not cid:
@@ -326,9 +340,11 @@ def _is_authorized(cid: str, sender: str) -> bool:
         return True
     return False
 
+
 def _run_with_tip(fn, cid: str, task: str) -> None:
     fn(cid, task)
     send_msg(cid, "💡 *لتعديل هذا المخرج وإعادة إنتاجه فوراً وفق ملاحظتك، أرسل:*\n`تعديل: [اكتب التعديل المطلوب هنا]`")
+
 
 def _handle_admin_commands(cid: str, clean: str) -> bool:
     if clean.startswith("اقترح تطوير"):
@@ -353,6 +369,7 @@ def _handle_admin_commands(cid: str, clean: str) -> bool:
                 handler(int(pid_str))
             return True
     return False
+
 
 def _dispatch_smart(cid: str, txt: str, sname: str, is_admin: bool = False, from_voice: bool = False) -> None:
     clean = txt.strip()
@@ -379,7 +396,6 @@ def _dispatch_smart(cid: str, txt: str, sname: str, is_admin: bool = False, from
             else:
                 send_msg(cid, f"✅ *تم اعتماد القاعدة في ملفك الشخصي ({user_tag}):*\n«{note}»\n\nسيتم الالتزام بها في جميع أعمالك القادمة.")
             return
-
     LAST_TASK[cid] = clean
     low_clean = clean.lower()
 
@@ -426,6 +442,7 @@ def _dispatch_smart(cid: str, txt: str, sname: str, is_admin: bool = False, from
         else:
             EXECUTOR.submit(safe_run, run_task, cid, task, user_tag, sname)
 
+
 def _send_generated_image(cid: str, task: str) -> None:
     send_msg(cid, "🎨 جاري رسم وتصميم الصورة بأعلى دقة...")
     img_bytes = ai_generate_image(task)
@@ -434,14 +451,19 @@ def _send_generated_image(cid: str, task: str) -> None:
         return
     gid = os.environ.get("GREEN_API_ID") or os.environ.get("GREEN_ID", "")
     gtok = os.environ.get("GREEN_API_TOKEN") or os.environ.get("GREEN_TOKEN", "")
-    gurl = os.environ.get("GREEN_API_URL") or os.environ.get("GREEN_BASE") or "".join(["https://", "api.", "green-api.com"])
-    url = f"{gurl}/waInstance{gid}/sendFileByUpload/{gtok}"
+    gurl = (os.environ.get("GREEN_API_URL") or os.environ.get("GREEN_BASE") or "".join(["https://", "api.", "green-api.com"])).rstrip("/")
+    if "waInstance" in gurl:
+        url = f"{gurl}/sendFileByUpload/{gtok}"
+    else:
+        url = f"{gurl}/waInstance{gid}/sendFileByUpload/{gtok}"
+    target = cid if "@" in cid else f"{cid}@c.us"
     requests.post(
         url,
-        data={"chatId": cid, "caption": f"🎨 تم التصميم: {task[:80]}"},
+        data={"chatId": target, "fileName": "design.png", "caption": f"🎨 تم التصميم: {task[:80]}"},
         files={"file": ("design.png", img_bytes, "image/png")},
         timeout=30,
     )
+
 
 def _build_live_site(cid: str, task: str) -> None:
     send_msg(cid, "🌐 جاري تصميم وبرمجة الموقع وتجهيز رابط المعاينة والتعديل المباشر...")
@@ -451,7 +473,8 @@ def _build_live_site(cid: str, task: str) -> None:
         "مع أقسام متكاملة وأزرار تفاعلية وصور عالية الدقة من Unsplash أو LoremFlickr.\n"
         "أرجع كود HTML الكامل فقط بدءا من <!DOCTYPE html> وحتى </html> بدون أي مقدمات أو علامات markdown."
     )
-    clean_html = ai_ask(task, prompt, mode="coding", use_cache=False).replace("```html", "").replace("```", "").strip()
+    raw_html = ai_ask(task, prompt, mode="coding", use_cache=False) or ""
+    clean_html = raw_html.replace("```html", "").replace("```", "").strip()
     if "<html" not in clean_html.lower():
         clean_html = f"<!DOCTYPE html><html dir='rtl' lang='ar'><head><meta charset='utf-8'><title>{task[:40]}</title><script src='{TW_CDN}'></script></head><body class='bg-slate-950 text-white p-8 font-sans'>{clean_html}</body></html>"
 
@@ -461,6 +484,7 @@ def _build_live_site(cid: str, task: str) -> None:
     sid = rec.get("id", 1) if isinstance(rec, dict) else 1
     site_link = f"{RENDER_URL}/site/{sid}" if RENDER_URL else f"/site/{sid}"
     send_msg(cid, f"🌐 *تم تصميم وإطلاق الموقع بنجاح!*\n\n🔗 *رابط الموقع المباشر (مع أداة التعديل الفوري أسفل الصفحة):*\n{site_link}\n\n💡 يمكنك أيضا كتابة `تعديل: [وصف التعديل]` هنا في المحادثة لإعادة بنائه.")
+
 
 def _push_to_github(cid: str, task: str) -> None:
     if not GITHUB_TOKEN:
@@ -477,11 +501,10 @@ def _push_to_github(cid: str, task: str) -> None:
 
     repo_info = r_repo.json()
     full_name, html_url = repo_info.get("full_name", ""), repo_info.get("html_url", "")
-    code_content = ai_ask(task, "اكتب الكود البرمجي الكامل والاحترافي لهذا المشروع بدون مقدمات أو شرح:", mode="coding", use_cache=False)
+    code_content = ai_ask(task, "اكتب الكود البرمجي الكامل والاحترافي لهذا المشروع بدون مقدمات أو شرح:", mode="coding", use_cache=False) or ""
     b64_code = base64.b64encode(code_content.encode("utf-8")).decode("utf-8")
     requests.put(f"{GITHUB_API}/repos/{full_name}/contents/index.html", headers=headers, json={"message": "Initial commit", "content": b64_code}, timeout=15)
     send_msg(cid, f"✅ *تم إنشاء المستودع ورفع المشروع على GitHub بنجاح:*\n{html_url}")
-
 BOT_PREFIXES = (
     "🔍", "⚙️", "🛡️", "📑", "🌐", "🚀", "💻", "⚠", "✅", "🤖", "📊", "📄", "📽️", "🎨",
     "👥", "💡", "🧠", "🎙", "📚", "🔄", "📌", "📦", "🛍️", "🏗️", "⚖️", "🧾", "🔬", "❌", "↩️",
@@ -489,6 +512,7 @@ BOT_PREFIXES = (
 VALID_WEBHOOKS = {"incomingMessageReceived", "outgoingMessageReceived"}
 MEDIA_TYPES = {"audioMessage", "imageMessage", "documentMessage"}
 EXPORT_KEYWORDS = ("وورد", "اكسل", "إكسل", "بوربوينت", "باور بي", "pdf", "تقرير", "لوحة", "لخص")
+
 
 def _handle_media_message(cid: str, mdata: dict[str, Any], sname: str, is_admin: bool = False) -> None:
     file_data = mdata.get("fileMessageData", {})
@@ -515,6 +539,7 @@ def _handle_media_message(cid: str, mdata: dict[str, Any], sname: str, is_admin:
         _dispatch_smart(cid, f"{caption}\n\nالبيانات المستخرجة من المرفق:\n{analysis}", sname, is_admin)
     else:
         send_msg(cid, analysis)
+
 
 @app.route("/whatsapp-webhook", methods=["POST"])
 def webhook():
@@ -548,6 +573,7 @@ def webhook():
         EXECUTOR.submit(_dispatch_smart, cid, txt, sname, is_admin)
 
     return jsonify({"status": "ok"}), 200
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))

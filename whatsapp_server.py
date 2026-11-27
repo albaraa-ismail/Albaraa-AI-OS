@@ -18,7 +18,7 @@ from core.auto_scheduler import (
     start_scheduler,
 )
 from core.config import ADMIN_PHONE, ALLOWED_GROUP, GITHUB_API, GITHUB_TOKEN, PARTNER_PHONE, RENDER_URL
-from core.core_ai import ai_ask, ai_ask_json, ai_generate_image, sb
+from core.core_ai import ai_ask, ai_ask_json, ai_generate_image, inspect_api_keys_report, sb
 from core.orchestrator import run_task, send_msg
 from multimodal.media_maker import make_voice_note
 from multimodal.media_reader import read_media_from_url, transcribe_voice_note
@@ -347,6 +347,10 @@ def _run_with_tip(fn, cid: str, task: str) -> None:
 
 
 def _handle_admin_commands(cid: str, clean: str) -> bool:
+    if clean in ("فحص المفاتيح", "المفاتيح", "الرصيد"):
+        send_msg(cid, "🔍 جاري فحص جميع المفاتيح والأرصدة المسجلة في النظام...")
+        EXECUTOR.submit(safe_run, lambda: send_msg(cid, inspect_api_keys_report()))
+        return True
     if clean.startswith("اقترح تطوير"):
         topic = clean.replace("اقترح تطوير", "").strip() or "تحسين الأداء وإضافة ميزة جديدة"
         send_msg(cid, "🔬 جاري البحث وتحليل السجلات لاقتراح تطوير برمجي آمن ومفحوص...")

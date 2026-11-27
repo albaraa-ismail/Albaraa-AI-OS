@@ -226,9 +226,9 @@ def _build_word_doc(
                 pc.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 pc.add_run().add_picture(chart_img, width=Inches(5.8))
 
-    if table_rows and len(table_rows) > 1 and isinstance(table_rows, list) and isinstance(table_rows, list):
+        if table_rows and len(table_rows) > 1 and isinstance(table_rows, list) and isinstance(table_rows[0], list):
         _add(doc, "📊 جدول المؤشرات والمقارنات التنفيذية", 15, True, (11, 25, 44), 12, 6)
-        num_cols = max(len(table_rows), 1)
+        num_cols = max(len(table_rows[0]), 1)
         tbl_d = doc.add_table(rows=len(table_rows), cols=num_cols)
         tbl_d.style = "Table Grid"
         for ri, row_vals in enumerate(table_rows):

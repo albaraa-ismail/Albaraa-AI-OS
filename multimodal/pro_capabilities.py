@@ -2,6 +2,8 @@ import gc
 import os
 import re
 import uuid
+import base64
+import struct
 from typing import Any
 import requests
 import pendulum
@@ -25,16 +27,23 @@ def send_file(cid: str, file_path: str, filename: str, mime: str = DOCX_MIME, ca
     if not (GREEN_ID and GREEN_TOKEN and cid and os.path.exists(file_path)):
         return False
     chat_id = cid if "@" in cid else f"{cid}@c.us"
-    url = f"{GREEN_BASE}{GREEN_ID}/sendFileByUpload/{GREEN_TOKEN}"
+    base = GREEN_BASE.rstrip("/")
+    if "waInstance" in base:
+        url = f"{base}/sendFileByUpload/{GREEN_TOKEN}"
+    else:
+        url = f"{base}/waInstance{GREEN_ID}/sendFileByUpload/{GREEN_TOKEN}"
     try:
         with open(file_path, "rb") as f:
             res = requests.post(
                 url,
                 data={"chatId": chat_id, "fileName": filename, "caption": caption},
                 files={"file": (filename, f, mime)},
-                timeout=30,
+                timeout=35,
             )
-        return res.status_code == 200
+        if res.status_code == 200:
+            return True
+        print(f"WA File Err [{res.status_code}]: {res.text[:120]}", flush=True)
+        return False
     except Exception as exc:
         print(f"WA File Err: {exc}", flush=True)
         return False
@@ -100,8 +109,6 @@ def _export_styled_doc(cid: str, title: str, body: str, domain_tag: str, file_pr
         os.remove(out_path)
     del doc
     gc.collect()
-import base64
-import struct
 
 
 def build_zatca_qr_base64(seller: str, vat_num: str, total: float, vat_amount: float) -> str:

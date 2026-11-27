@@ -17,6 +17,15 @@ MIME = {
 }
 
 
+def _ar_text(text: Any, max_len: int = 0) -> str:
+    import arabic_reshaper
+    from bidi.algorithm import get_display
+    s = str(text or "").strip()
+    if max_len > 0:
+        s = s[:max_len]
+    return get_display(arabic_reshaper.reshape(s))
+
+
 def today_dates() -> str:
     now = pendulum.now("Asia/Riyadh")
     h = Gregorian(now.year, now.month, now.day).to_hijri()
@@ -84,16 +93,14 @@ def _make_word_chart(title: str, labels: list[str], values: list[float], out_pat
     if not labels or not values:
         return ""
     try:
-        import arabic_reshaper
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-        from bidi.algorithm import get_display
 
-        _ar = lambda t: get_display(arabic_reshaper.reshape(str(t)[:18]), base_dir="R")
+        plt.rcParams["font.sans-serif"] = ["DejaVu Sans", "Arial"]
         fig, ax = plt.subplots(figsize=(7.5, 3.2), dpi=130)
-        bars = ax.bar([_ar(l) for l in labels[:6]], values[:6], color=["#0B192C", "#1E3E62", "#D97706", "#059669", "#2563EB", "#7C3AED"], width=0.45)
-        ax.set_title(_ar(title), fontsize=12, fontweight="bold", color="#0B192C", pad=12)
+        bars = ax.bar([_ar_text(l, 18) for l in labels[:6]], values[:6], color=["#0B192C", "#1E3E62", "#D97706", "#059669", "#2563EB", "#7C3AED"], width=0.45)
+        ax.set_title(_ar_text(title), fontsize=12, fontweight="bold", color="#0B192C", pad=12)
         ax.grid(axis="y", linestyle="--", alpha=0.35)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
@@ -116,8 +123,6 @@ def _drop(*paths: str) -> None:
                 os.remove(p)
             except OSError:
                 pass
-
-
 def make_kpi(cid: str) -> None:
     import openpyxl
 
@@ -135,6 +140,8 @@ def make_kpi(cid: str) -> None:
     _drop(path)
     del wb
     gc.collect()
+
+
 def _build_word_doc(
     cid: str,
     title: str,
@@ -219,9 +226,9 @@ def _build_word_doc(
                 pc.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 pc.add_run().add_picture(chart_img, width=Inches(5.8))
 
-    if table_rows and len(table_rows) > 1 and isinstance(table_rows, list):
+    if table_rows and len(table_rows) > 1 and isinstance(table_rows, list) and isinstance(table_rows, list):
         _add(doc, "📊 جدول المؤشرات والمقارنات التنفيذية", 15, True, (11, 25, 44), 12, 6)
-        num_cols = len(table_rows)
+        num_cols = max(len(table_rows), 1)
         tbl_d = doc.add_table(rows=len(table_rows), cols=num_cols)
         tbl_d.style = "Table Grid"
         for ri, row_vals in enumerate(table_rows):
@@ -241,8 +248,6 @@ def _build_word_doc(
     _drop(path, cover, mid_img, chart_img)
     del doc
     gc.collect()
-
-
 def make_word(cid: str, msg: str) -> None:
     is_ac = any(k in msg for k in ("بحث", "علمي", "أكاديمي", "اكاديمي", "دراسة", "مراجع"))
     send_msg(cid, "📄 جاري إعداد الوثيقة وتصميم الرسوم البيانية والصور والجداول...")
@@ -258,18 +263,19 @@ def make_word(cid: str, msg: str) -> None:
     vis = ai_ask_json(f"للموضوع: {title}\n" + 'أرجع JSON فقط لرسم بياني وجدول: {"chart_title": "عنوان الرسم", "labels": ["بند1", "بند2", "بند3", "بند4"], "values":, "table": [["المعيار", "القيمة الحالية", "المستهدف"], ["بند 1", "85%", "95%"], ["بند 2", "92%", "98%"], ["بند 3", "78%", "90%"]]}', "محلل بيانات.", mode="office") or {}
     chart_d = {"title": vis.get("chart_title", title), "labels": vis.get("labels", []), "values": vis.get("values", [])}
     _build_word_doc(cid, title, "دراسة علمية محكمة" if is_ac else "تقرير تحليلي وتنفيذي", sections, _detect_font(msg), f"📄 تم إصدار الوثيقة المدعومة بالصور والرسوم البيانية: *{title}*", "office.word_exported", with_cover=True, chart_data=chart_d, table_rows=vis.get("table"))
+
+
 def make_excel(cid: str, msg: str) -> None:
     import openpyxl
-    import arabic_reshaper
     from openpyxl.utils import get_column_letter
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.drawing.image import Image as XLImage
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from bidi.algorithm import get_display
 
-    _ar = lambda txt: get_display(arabic_reshaper.reshape(str(txt)), base_dir="R")
+    plt.rcParams["font.sans-serif"] = ["DejaVu Sans", "Arial"]
+    _ar = lambda txt: _ar_text(txt)
     send_msg(cid, "📊 جاري إعداد ملف الإكسل ولوحة المؤشرات والرسوم البيانية...")
     prompt = (
         "أنت محلل بيانات وخبير تصميم لوحات قيادة Excel. أنشئ 3 أقسام مفصولة بسطر === فقط:\n"
@@ -342,7 +348,7 @@ def make_excel(cid: str, msg: str) -> None:
         pass_cnt += int(pct >= 85)
         eval_txt = "متفوق 🌟" if pct >= 100 else ("جيد جداً ✅" if pct >= 85 else "يحتاج تطوير ⚠️")
         if len(chart_labels) < 7:
-            chart_labels.append(_ar(str(nm)[:13]))
+            chart_labels.append(_ar_text(nm, 13))
             chart_act.append(ac)
             chart_tgt.append(tg)
 
@@ -356,7 +362,6 @@ def make_excel(cid: str, msg: str) -> None:
                 c.fill = f_zebra
             if c_i == 9:
                 c.fill = f_green if pct >= 100 else (f_blue if pct >= 85 else f_amber)
-
     cnt = max(len(rows), 1)
     avg_pct = round(sum_pct / cnt, 1)
     tot_r = last_r + 1
@@ -452,7 +457,7 @@ def make_pptx(cid: str, msg: str) -> None:
 
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
-    blank = prs.slide_layouts
+    blank = prs.slide_layouts[6]
     NAVY, SLATE, GOLD, WHITE, LIGHT, DARK = (
         RGBColor(11, 25, 44),
         RGBColor(30, 62, 98),
@@ -489,7 +494,6 @@ def make_pptx(cid: str, msg: str) -> None:
             s0.shapes.add_picture(slide_img, Inches(0.8), Inches(4.5), width=Inches(3.2))
         except Exception:
             pass
-
     for idx, sl in enumerate(data.get("slides", [])[:8], 1):
         s = prs.slides.add_slide(blank)
         s.background.fill.solid()

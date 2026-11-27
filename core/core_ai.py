@@ -13,23 +13,23 @@ from core.failover_cache import SMART_CACHE, FAILOVER
 from core.event_bus import BUS
 
 SESSION = requests.Session()
-SESSION.headers.update({"User-Agent": "Albaraa-AI-OS/3.5"})
-DEFAULT_TIMEOUT = 45
+SESSION.headers.update({"User-Agent": "Albaraa-AI-OS/4.0"})
+DEFAULT_TIMEOUT = 22
 
 GEMINI_BASE_URL = URLS["gemini"]
 GEM_KEY = GEM_KEYS[0] if GEM_KEYS else ""
 _rotated = rotated_keys
 
 MODE_ROUTING: dict[str, list[str]] = {
-    "arabic": ["gemini", "groq", "cohere", "openrouter", "cloudflare"],
-    "fast": ["groq", "gemini", "cloudflare", "openrouter"],
-    "general": ["gemini", "groq", "cohere", "openrouter", "cloudflare"],
-    "reasoning": ["gemini", "groq", "cohere", "openrouter"],
-    "coding": ["gemini", "groq", "openrouter", "cloudflare"],
-    "office": ["gemini", "groq", "cohere", "openrouter"],
+    "arabic": ["gemini", "groq", "samba", "cohere", "openrouter", "cloudflare"],
+    "fast": ["groq", "samba", "gemini", "openrouter", "cloudflare"],
+    "general": ["gemini", "groq", "samba", "cohere", "openrouter", "cloudflare"],
+    "reasoning": ["gemini", "samba", "groq", "openrouter", "cohere"],
+    "coding": ["groq", "samba", "openrouter", "gemini", "cloudflare"],
+    "office": ["gemini", "groq", "samba", "cohere", "openrouter"],
 }
 
-GEMINI_MODELS = ("gemini-2.5-pro", "gemini-3-flash-preview", "gemini-3.1-pro-preview", "gemini-flash-latest")
+GEMINI_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest")
 
 OPENAI_COMPAT: dict[str, tuple[str, str]] = {
     "groq": (URLS["groq_chat"], "llama-3.3-70b-versatile"),
@@ -59,7 +59,7 @@ def sb(method: str, table: str, data: Any = None, q: str = "") -> Any:
         "Prefer": "return=representation",
     }
     try:
-        res = SESSION.request(method_upper, f"{SB_URL}/rest/v1/{table}{q}", headers=headers, json=data, timeout=15)
+        res = SESSION.request(method_upper, f"{SB_URL}/rest/v1/{table}{q}", headers=headers, json=data, timeout=12)
         if res.status_code in (200, 201):
             return res.json()
     except Exception as exc:
@@ -86,8 +86,6 @@ def send_msg(chat_id: str, text: str) -> Optional[dict[str, Any]]:
     except Exception as exc:
         print(f"WA Conn Err: {exc}", flush=True)
     return None
-
-
 def _messages(prompt: str, system: str) -> list[dict[str, str]]:
     return ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
 
@@ -132,6 +130,8 @@ def _ask_gemini(key: str, prompt: str, system: str, temp: float, max_tokens: int
         except (KeyError, IndexError, TypeError, AttributeError):
             continue
     return None
+
+
 def _ask_cohere(key: str, prompt: str, system: str, temp: float, max_tokens: int) -> Optional[str]:
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     payload = {"model": "command-a-03-2025", "messages": _messages(prompt, system), "temperature": temp, "max_tokens": max_tokens}
@@ -139,7 +139,7 @@ def _ask_cohere(key: str, prompt: str, system: str, temp: float, max_tokens: int
     try:
         content = data["message"]["content"]
         if isinstance(content, list) and content:
-            text = content.get("text", "")
+            text = content[0].get("text", "") if isinstance(content[0], dict) else ""
         elif isinstance(content, dict):
             text = content.get("text", "")
         else:
@@ -228,7 +228,7 @@ def ai_vision(image_bytes: bytes, mime_type: str, prompt: str, system: str = "")
         for model in GEMINI_MODELS:
             data = _post(f"{URLS['gemini']}{model}:generateContent?key={key}", payload, tag=f"vision:{model}")
             try:
-                text = data["candidates"]["content"]["parts"]["text"]
+                text = data["candidates"][0]["content"]["parts"][0]["text"]
                 if isinstance(text, str) and text.strip():
                     return text.strip()
             except (KeyError, IndexError, TypeError, AttributeError):
@@ -245,26 +245,29 @@ def ai_generate_image(prompt: str) -> Optional[bytes]:
     en_prompt = prompt if "عذراً، جميع محركات" in translated else translated
 
     if CF_ACCOUNT and CF_TOKEN:
-        cf_base = "".join(["https://", "api.", "cloudflare.com", "/client/v4/accounts"])
+        cf_base = "https://cloudflare.com"
         url = f"{cf_base}/{CF_ACCOUNT}/ai/run/@cf/black-forest-labs/flux-1-schnell"
         try:
-            res = SESSION.post(url, headers={"Authorization": f"Bearer {CF_TOKEN}"}, json={"prompt": en_prompt}, timeout=45)
+            res = SESSION.post(url, headers={"Authorization": f"Bearer {CF_TOKEN}"}, json={"prompt": en_prompt}, timeout=30)
             if res.status_code == 200 and res.content:
-                return res.content
+                if "application/json" in res.headers.get("Content-Type", ""):
+                    img_b64 = res.json().get("result", {}).get("image")
+                    if img_b64:
+                        return base64.b64decode(img_b64)
+                else:
+                    return res.content
         except Exception as exc:
             print(f"CF Image Err: {exc}", flush=True)
 
     try:
         encoded = requests.utils.quote(en_prompt)
-        fallback_base = "".join(["https://", "image.", "pollinations.ai", "/prompt/"])
-        res = SESSION.get(f"{fallback_base}{encoded}?width=1024&height=1024&nologo=true", timeout=45)
+        url = f"https://pollinations.ai{encoded}?width=1024&height=1024&nologo=true"
+        res = SESSION.get(url, timeout=30)
         if res.status_code == 200 and res.content:
             return res.content
     except Exception as exc:
         print(f"Fallback Image Err: {exc}", flush=True)
     return None
-
-
 def ai_ask_json(prompt: str, system: str = "", mode: str = "fast") -> dict[str, Any]:
     strict_system = f"{system}\nأجب بصيغة JSON صالحة فقط بدون أي نص إضافي أو علامات Markdown.".strip()
     raw = ai_ask(prompt, system=strict_system, temperature=0.1, mode=mode, use_cache=False)
@@ -285,14 +288,16 @@ def check_providers_health() -> dict[str, bool]:
         "openrouter": bool(OR_KEYS),
         "cloudflare": bool(CF_ACCOUNT and CF_TOKEN),
         "supabase": bool(SB_URL and SB_KEY),
+        "green_api": bool(GREEN_ID and GREEN_TOKEN),
     }
 
 
 def inspect_api_keys_report() -> str:
-    lines = ["🔑 *تقرير فحص المفاتيح والأرصدة الحية:*\n"]
+    total_ai_keys = len(GEM_KEYS) + len(GROQ_KEYS) + len(SAMBA_KEYS) + len(COHERE_KEYS) + len(OR_KEYS)
+    lines = [f"🔑 *تقرير فحص مكونات النظام ({total_ai_keys} مفتاح ذكاء اصطناعي + الخدمات):*\n"]
 
     if OR_KEYS:
-        lines.append(f"🌐 *OpenRouter* (عدد المفاتيح: {len(OR_KEYS)}):")
+        lines.append(f"🌐 *OpenRouter* ({len(OR_KEYS)}):")
         for idx, k in enumerate(OR_KEYS, 1):
             masked = f"{k[:8]}...{k[-4:]}" if len(k) > 12 else "***"
             try:
@@ -301,30 +306,26 @@ def inspect_api_keys_report() -> str:
                     info = r.json().get("data", {})
                     limit = info.get("limit")
                     usage = round(float(info.get("usage", 0)), 4)
-                    bal = f"متبقي: ${round(limit - usage, 3)}" if limit is not None else f"مستهلك: ${usage} (مجاني/غير محدود)"
+                    bal = f"متبقي: ${round(limit - usage, 3)}" if limit is not None else f"مستهلك: ${usage} (مجاني)"
                     lines.append(f"  • مفتاح {idx} (`{masked}`): ✅ نشط ({bal})")
                 else:
                     lines.append(f"  • مفتاح {idx} (`{masked}`): ❌ خطأ ({r.status_code})")
             except Exception:
                 lines.append(f"  • مفتاح {idx} (`{masked}`): ⚠️ تعذر الاتصال")
-    else:
-        lines.append("🌐 *OpenRouter*: ⚪ لا توجد مفاتيح مضافة")
 
     if GEM_KEYS:
-        lines.append(f"\n✨ *Google Gemini* (عدد المفاتيح: {len(GEM_KEYS)}):")
+        lines.append(f"\n✨ *Google Gemini* ({len(GEM_KEYS)}):")
         for idx, k in enumerate(GEM_KEYS, 1):
             masked = f"{k[:8]}...{k[-4:]}" if len(k) > 12 else "***"
             try:
                 r = SESSION.get(f"{URLS['gemini']}?key={k}", timeout=8)
-                status = "✅ نشط ومتاح" if r.status_code == 200 else f"❌ غير صالح/محظور ({r.status_code})"
+                status = "✅ نشط ومتاح" if r.status_code == 200 else f"❌ خطأ ({r.status_code})"
                 lines.append(f"  • مفتاح {idx} (`{masked}`): {status}")
             except Exception:
                 lines.append(f"  • مفتاح {idx} (`{masked}`): ⚠️ تعذر الاتصال")
-    else:
-        lines.append("\n✨ *Google Gemini*: ⚪ لا توجد مفاتيح مضافة")
 
     if GROQ_KEYS:
-        lines.append(f"\n⚡ *Groq* (عدد المفاتيح: {len(GROQ_KEYS)}):")
+        lines.append(f"\n⚡ *Groq* ({len(GROQ_KEYS)}):")
         for idx, k in enumerate(GROQ_KEYS, 1):
             masked = f"{k[:8]}...{k[-4:]}" if len(k) > 12 else "***"
             try:
@@ -333,11 +334,55 @@ def inspect_api_keys_report() -> str:
                 lines.append(f"  • مفتاح {idx} (`{masked}`): {status}")
             except Exception:
                 lines.append(f"  • مفتاح {idx} (`{masked}`): ⚠️ تعذر الاتصال")
-    else:
-        lines.append("\n⚡ *Groq*: ⚪ لا توجد مفاتيح مضافة")
 
-    lines.append(f"\n🧠 *Cohere*: {len(COHERE_KEYS)} مفاتيح مسجلة")
-    lines.append(f"🚀 *SambaNova*: {len(SAMBA_KEYS)} مفاتيح مسجلة")
-    lines.append(f"☁️ *Cloudflare AI*: {'✅ مفعّل' if (CF_ACCOUNT and CF_TOKEN) else '⚪ غير مفعّل'}")
+    if SAMBA_KEYS:
+        lines.append(f"\n🚀 *SambaNova* ({len(SAMBA_KEYS)}):")
+        for idx, k in enumerate(SAMBA_KEYS, 1):
+            masked = f"{k[:8]}...{k[-4:]}" if len(k) > 12 else "***"
+            try:
+                r = SESSION.get("https://sambanova.ai", headers={"Authorization": f"Bearer {k}"}, timeout=8)
+                status = "✅ نشط ومتاح" if r.status_code == 200 else f"❌ خطأ ({r.status_code})"
+                lines.append(f"  • مفتاح {idx} (`{masked}`): {status}")
+            except Exception:
+                lines.append(f"  • مفتاح {idx} (`{masked}`): ⚠️ تعذر الاتصال")
+
+    if COHERE_KEYS:
+        lines.append(f"\n🧠 *Cohere* ({len(COHERE_KEYS)}):")
+        for idx, k in enumerate(COHERE_KEYS, 1):
+            masked = f"{k[:8]}...{k[-4:]}" if len(k) > 12 else "***"
+            try:
+                r = SESSION.get("https://cohere.com", headers={"Authorization": f"Bearer {k}"}, timeout=8)
+                status = "✅ نشط ومتاح" if r.status_code == 200 else f"❌ خطأ ({r.status_code})"
+                lines.append(f"  • مفتاح {idx} (`{masked}`): {status}")
+            except Exception:
+                lines.append(f"  • مفتاح {idx} (`{masked}`): ⚠️ تعذر الاتصال")
+
+    lines.append("\n🛠️ *الخدمات والربط الأساسي:*")
+    if CF_ACCOUNT and CF_TOKEN:
+        try:
+            cf_r = SESSION.get(
+                f"https://cloudflare.com{CF_ACCOUNT}/tokens/verify",
+                headers={"Authorization": f"Bearer {CF_TOKEN}"},
+                timeout=8,
+            )
+            cf_st = "✅ نشط" if cf_r.status_code == 200 else f"❌ خطأ مصادقة ({cf_r.status_code})"
+        except Exception:
+            cf_st = "⚠️ تعذر الاتصال"
+    else:
+        cf_st = "⚪ غير مفعّل"
+    lines.append(f"  • *Cloudflare AI (2 vars)*: {cf_st}")
+
+    if SB_URL and SB_KEY:
+        try:
+            sb_r = SESSION.get(f"{SB_URL}/rest/v1/", headers={"apikey": SB_KEY}, timeout=8)
+            sb_st = "✅ متصل" if sb_r.status_code in (200, 404) else f"❌ خطأ ({sb_r.status_code})"
+        except Exception:
+            sb_st = "⚠️ تعذر الاتصال"
+    else:
+        sb_st = "⚪ غير مفعّل"
+    lines.append(f"  • *Supabase DB (2 vars)*: {sb_st}")
+
+    g_st = "✅ مفعّل" if (GREEN_ID and GREEN_TOKEN) else "❌ ناقص"
+    lines.append(f"  • *Green API WhatsApp (3 vars)*: {g_st}")
 
     return "\n".join(lines)

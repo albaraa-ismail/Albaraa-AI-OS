@@ -13,26 +13,27 @@ from core.failover_cache import SMART_CACHE, FAILOVER
 from core.event_bus import BUS
 
 SESSION = requests.Session()
-SESSION.headers.update({"User-Agent": "Albaraa-AI-OS/3.3"})
-DEFAULT_TIMEOUT = 60
+SESSION.headers.update({"User-Agent": "Albaraa-AI-OS/3.4"})
+DEFAULT_TIMEOUT = 45
 
 GEMINI_BASE_URL = URLS["gemini"]
 GEM_KEY = GEM_KEYS[0] if GEM_KEYS else ""
 _rotated = rotated_keys
 
 MODE_ROUTING: dict[str, list[str]] = {
-    "arabic": ["gemini", "groq", "openrouter", "cohere", "cloudflare"],
-    "fast": ["groq", "gemini", "openrouter", "cloudflare"],
-    "general": ["groq", "gemini", "openrouter", "cohere", "cloudflare"],
-    "reasoning": ["gemini", "groq", "openrouter", "cohere"],
-    "coding": ["openrouter", "gemini", "groq"],
-    "office": ["gemini", "groq", "openrouter", "cohere"],
+    "arabic": ["gemini", "groq", "samba", "openrouter", "cohere", "cloudflare"],
+    "fast": ["groq", "gemini", "samba", "openrouter", "cloudflare"],
+    "general": ["gemini", "groq", "samba", "openrouter", "cohere", "cloudflare"],
+    "reasoning": ["gemini", "samba", "groq", "openrouter", "cohere"],
+    "coding": ["gemini", "openrouter", "groq", "samba"],
+    "office": ["gemini", "groq", "samba", "openrouter", "cohere"],
 }
 
-GEMINI_MODELS = ("gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.1-flash-lite")
+GEMINI_MODELS = ("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash")
 
 OPENAI_COMPAT: dict[str, tuple[str, str]] = {
-    "groq": (URLS["groq_chat"], "llama-3.3-70b-versatile"),
+    "groq": (URLS["groq_chat"], "llama-3.1-8b-instant"),
+    "samba": (URLS.get("samba", "https://sambanova.ai"), "Meta-Llama-3.3-70B-Instruct"),
     "openrouter": (URLS["openrouter"], "openrouter/free"),
 }
 
@@ -70,7 +71,11 @@ def send_msg(chat_id: str, text: str) -> Optional[dict[str, Any]]:
     if not GREEN_ID or not GREEN_TOKEN or not chat_id:
         return None
     target = chat_id if "@" in chat_id else f"{chat_id}@c.us"
-    url = f"{GREEN_BASE}/waInstance{GREEN_ID}/sendMessage/{GREEN_TOKEN}"
+    base = GREEN_BASE.rstrip("/")
+    if "waInstance" in base:
+        url = f"{base}/sendMessage/{GREEN_TOKEN}"
+    else:
+        url = f"{base}/waInstance{GREEN_ID}/sendMessage/{GREEN_TOKEN}"
     try:
         res = SESSION.post(url, json={"chatId": target, "message": text}, timeout=15)
         if res.status_code == 200:
@@ -104,8 +109,9 @@ def _ask_openai_compat(provider: str, key: str, prompt: str, system: str, temp: 
     payload = {"model": model, "messages": _messages(prompt, system), "temperature": temp, "max_tokens": max_tokens}
     data = _post(url, payload, headers, provider)
     try:
-        return data["choices"][0]["message"]["content"].strip() if data else None
-    except (KeyError, IndexError, TypeError):
+        content = data["choices"][0]["message"]["content"]
+        return content.strip() if isinstance(content, str) and content.strip() else None
+    except (KeyError, IndexError, TypeError, AttributeError):
         return None
 
 
@@ -120,9 +126,10 @@ def _ask_gemini(key: str, prompt: str, system: str, temp: float, max_tokens: int
     for model in GEMINI_MODELS:
         data = _post(f"{URLS['gemini']}{model}:generateContent?key={key}", payload, tag=f"gemini:{model}")
         try:
-            if data:
-                return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-        except (KeyError, IndexError, TypeError):
+            text = data["candidates"][0]["content"]["parts"][0]["text"]
+            if isinstance(text, str) and text.strip():
+                return text.strip()
+        except (KeyError, IndexError, TypeError, AttributeError):
             continue
     return None
 def _ask_cohere(key: str, prompt: str, system: str, temp: float, max_tokens: int) -> Optional[str]:
@@ -130,16 +137,29 @@ def _ask_cohere(key: str, prompt: str, system: str, temp: float, max_tokens: int
     payload = {"model": "command-a-03-2025", "messages": _messages(prompt, system), "temperature": temp, "max_tokens": max_tokens}
     data = _post(URLS["cohere"], payload, headers, "cohere")
     try:
-        return data["message"]["content"]["text"].strip() if data else None
-    except (KeyError, IndexError, TypeError):
+        content = data["message"]["content"]
+        if isinstance(content, list) and content:
+            text = content[0].get("text", "")
+        elif isinstance(content, dict):
+            text = content.get("text", "")
+        else:
+            text = ""
+        return text.strip() if isinstance(text, str) and text.strip() else None
+    except (KeyError, IndexError, TypeError, AttributeError):
         return None
+
 
 def _ask_cloudflare(prompt: str, system: str, temp: float) -> Optional[str]:
     if not CF_ACCOUNT or not CF_TOKEN:
         return None
     headers = {"Authorization": f"Bearer {CF_TOKEN}", "Content-Type": "application/json"}
     data = _post(URLS["cloudflare"], {"messages": _messages(prompt, system), "temperature": temp}, headers, "cloudflare")
-    return (data.get("result", {}).get("response") or "").strip() or None if data else None
+    try:
+        resp = (data or {}).get("result", {}).get("response")
+        return resp.strip() if isinstance(resp, str) and resp.strip() else None
+    except AttributeError:
+        return None
+
 
 def _call_provider(provider: str, prompt: str, system: str, temp: float, max_tokens: int) -> Optional[str]:
     if provider == "cloudflare":
@@ -158,6 +178,7 @@ def _call_provider(provider: str, prompt: str, system: str, temp: float, max_tok
         if res:
             return res
     return None
+
 
 def ai_ask(
     prompt: str,
@@ -191,6 +212,7 @@ def ai_ask(
 
     return "عذراً، جميع محركات الذكاء الاصطناعي مشغولة حالياً. يرجى المحاولة بعد قليل."
 
+
 def ai_vision(image_bytes: bytes, mime_type: str, prompt: str, system: str = "") -> Optional[str]:
     if not GEM_KEYS:
         return None
@@ -206,18 +228,22 @@ def ai_vision(image_bytes: bytes, mime_type: str, prompt: str, system: str = "")
         for model in GEMINI_MODELS:
             data = _post(f"{URLS['gemini']}{model}:generateContent?key={key}", payload, tag=f"vision:{model}")
             try:
-                if data:
-                    return data["candidates"]["content"]["parts"]["text"].strip()
-            except (KeyError, IndexError, TypeError):
+                text = data["candidates"][0]["content"]["parts"][0]["text"]
+                if isinstance(text, str) and text.strip():
+                    return text.strip()
+            except (KeyError, IndexError, TypeError, AttributeError):
                 continue
     return None
 
+
 def ai_generate_image(prompt: str) -> Optional[bytes]:
-    en_prompt = ai_ask(
+    translated = ai_ask(
         f"Convert this description into a clean, professional English image prompt (max 35 words, no extra text): {prompt}",
         mode="fast",
         use_cache=False,
     )
+    en_prompt = prompt if "عذراً، جميع محركات" in translated else translated
+
     if CF_ACCOUNT and CF_TOKEN:
         cf_base = "".join(["https://", "api.", "cloudflare.com", "/client/v4/accounts"])
         url = f"{cf_base}/{CF_ACCOUNT}/ai/run/@cf/black-forest-labs/flux-1-schnell"
@@ -238,6 +264,7 @@ def ai_generate_image(prompt: str) -> Optional[bytes]:
         print(f"Fallback Image Err: {exc}", flush=True)
     return None
 
+
 def ai_ask_json(prompt: str, system: str = "", mode: str = "fast") -> dict[str, Any]:
     strict_system = f"{system}\nأجب بصيغة JSON صالحة فقط بدون أي نص إضافي أو علامات Markdown.".strip()
     raw = ai_ask(prompt, system=strict_system, temperature=0.1, mode=mode, use_cache=False)
@@ -247,6 +274,7 @@ def ai_ask_json(prompt: str, system: str = "", mode: str = "fast") -> dict[str, 
         return json.loads(cleaned)
     except Exception:
         return {"raw_response": raw, "parse_error": True}
+
 
 def check_providers_health() -> dict[str, bool]:
     return {

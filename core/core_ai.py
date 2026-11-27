@@ -13,7 +13,7 @@ from core.failover_cache import SMART_CACHE, FAILOVER
 from core.event_bus import BUS
 
 SESSION = requests.Session()
-SESSION.headers.update({"User-Agent": "Albaraa-AI-OS/3.4"})
+SESSION.headers.update({"User-Agent": "Albaraa-AI-OS/3.5"})
 DEFAULT_TIMEOUT = 45
 
 GEMINI_BASE_URL = URLS["gemini"]
@@ -21,18 +21,18 @@ GEM_KEY = GEM_KEYS[0] if GEM_KEYS else ""
 _rotated = rotated_keys
 
 MODE_ROUTING: dict[str, list[str]] = {
-    "arabic": ["gemini", "groq", "samba", "openrouter", "cohere", "cloudflare"],
-    "fast": ["groq", "gemini", "samba", "openrouter", "cloudflare"],
-    "general": ["gemini", "groq", "samba", "openrouter", "cohere", "cloudflare"],
-    "reasoning": ["gemini", "samba", "groq", "openrouter", "cohere"],
-    "coding": ["gemini", "openrouter", "groq", "samba"],
-    "office": ["gemini", "groq", "samba", "openrouter", "cohere"],
+    "arabic": ["gemini", "groq", "cohere", "openrouter", "cloudflare"],
+    "fast": ["groq", "gemini", "cloudflare", "openrouter"],
+    "general": ["gemini", "groq", "cohere", "openrouter", "cloudflare"],
+    "reasoning": ["gemini", "groq", "cohere", "openrouter"],
+    "coding": ["gemini", "groq", "openrouter", "cloudflare"],
+    "office": ["gemini", "groq", "cohere", "openrouter"],
 }
 
-GEMINI_MODELS = ("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash")
+GEMINI_MODELS = ("gemini-2.5-pro", "gemini-3-flash-preview", "gemini-3.1-pro-preview", "gemini-flash-latest")
 
 OPENAI_COMPAT: dict[str, tuple[str, str]] = {
-    "groq": (URLS["groq_chat"], "llama-3.1-8b-instant"),
+    "groq": (URLS["groq_chat"], "llama-3.3-70b-versatile"),
     "samba": (URLS.get("samba", "https://sambanova.ai"), "Meta-Llama-3.3-70B-Instruct"),
     "openrouter": (URLS["openrouter"], "openrouter/free"),
 }
@@ -80,7 +80,7 @@ def send_msg(chat_id: str, text: str) -> Optional[dict[str, Any]]:
         res = SESSION.post(url, json={"chatId": target, "message": text}, timeout=15)
         if res.status_code == 200:
             data = res.json()
-            print(f"OUT [200] -> {target}: {json.dumps(data)}", flush=True)
+            print(f"OUT -> {target}: {json.dumps(data)}", flush=True)
             return data
         print(f"WA Err [{res.status_code}]: {res.text[:120]}", flush=True)
     except Exception as exc:
@@ -139,7 +139,7 @@ def _ask_cohere(key: str, prompt: str, system: str, temp: float, max_tokens: int
     try:
         content = data["message"]["content"]
         if isinstance(content, list) and content:
-            text = content[0].get("text", "")
+            text = content.get("text", "")
         elif isinstance(content, dict):
             text = content.get("text", "")
         else:
@@ -228,7 +228,7 @@ def ai_vision(image_bytes: bytes, mime_type: str, prompt: str, system: str = "")
         for model in GEMINI_MODELS:
             data = _post(f"{URLS['gemini']}{model}:generateContent?key={key}", payload, tag=f"vision:{model}")
             try:
-                text = data["candidates"][0]["content"]["parts"][0]["text"]
+                text = data["candidates"]["content"]["parts"]["text"]
                 if isinstance(text, str) and text.strip():
                     return text.strip()
             except (KeyError, IndexError, TypeError, AttributeError):
@@ -291,7 +291,6 @@ def check_providers_health() -> dict[str, bool]:
 def inspect_api_keys_report() -> str:
     lines = ["🔑 *تقرير فحص المفاتيح والأرصدة الحية:*\n"]
 
-    # 1. فحص مفاتيح OpenRouter مع الرصيد الفعلي
     if OR_KEYS:
         lines.append(f"🌐 *OpenRouter* (عدد المفاتيح: {len(OR_KEYS)}):")
         for idx, k in enumerate(OR_KEYS, 1):
@@ -311,7 +310,6 @@ def inspect_api_keys_report() -> str:
     else:
         lines.append("🌐 *OpenRouter*: ⚪ لا توجد مفاتيح مضافة")
 
-    # 2. فحص مفاتيح Gemini
     if GEM_KEYS:
         lines.append(f"\n✨ *Google Gemini* (عدد المفاتيح: {len(GEM_KEYS)}):")
         for idx, k in enumerate(GEM_KEYS, 1):
@@ -325,7 +323,6 @@ def inspect_api_keys_report() -> str:
     else:
         lines.append("\n✨ *Google Gemini*: ⚪ لا توجد مفاتيح مضافة")
 
-    # 3. فحص مفاتيح Groq
     if GROQ_KEYS:
         lines.append(f"\n⚡ *Groq* (عدد المفاتيح: {len(GROQ_KEYS)}):")
         for idx, k in enumerate(GROQ_KEYS, 1):
@@ -339,10 +336,8 @@ def inspect_api_keys_report() -> str:
     else:
         lines.append("\n⚡ *Groq*: ⚪ لا توجد مفاتيح مضافة")
 
-    # 4. فحص مفاتيح Cohere و SambaNova و Cloudflare
     lines.append(f"\n🧠 *Cohere*: {len(COHERE_KEYS)} مفاتيح مسجلة")
     lines.append(f"🚀 *SambaNova*: {len(SAMBA_KEYS)} مفاتيح مسجلة")
     lines.append(f"☁️ *Cloudflare AI*: {'✅ مفعّل' if (CF_ACCOUNT and CF_TOKEN) else '⚪ غير مفعّل'}")
 
     return "\n".join(lines)
-

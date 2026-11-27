@@ -1,6 +1,7 @@
 import re
 import json
 import base64
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 import requests
 
@@ -13,11 +14,11 @@ from core.failover_cache import SMART_CACHE, FAILOVER
 from core.event_bus import BUS
 
 SESSION = requests.Session()
-SESSION.headers.update({"User-Agent": "Albaraa-AI-OS/4.0"})
+SESSION.headers.update({"User-Agent": "Albaraa-AI-OS/4.1"})
 DEFAULT_TIMEOUT = 22
 
 GEMINI_BASE_URL = URLS["gemini"]
-GEM_KEY = GEM_KEYS[0] if GEM_KEYS else ""
+GEM_KEY = next(iter(GEM_KEYS), "")
 _rotated = rotated_keys
 
 MODE_ROUTING: dict[str, list[str]] = {
@@ -86,6 +87,7 @@ def send_msg(chat_id: str, text: str) -> Optional[dict[str, Any]]:
     except Exception as exc:
         print(f"WA Conn Err: {exc}", flush=True)
     return None
+
 def _messages(prompt: str, system: str) -> list[dict[str, str]]:
     return ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
 
@@ -107,9 +109,11 @@ def _ask_openai_compat(provider: str, key: str, prompt: str, system: str, temp: 
     payload = {"model": model, "messages": _messages(prompt, system), "temperature": temp, "max_tokens": max_tokens}
     data = _post(url, payload, headers, provider)
     try:
-        content = data["choices"][0]["message"]["content"]
+        choices = (data or {}).get("choices") or []
+        first_choice = next(iter(choices), {})
+        content = first_choice.get("message", {}).get("content", "")
         return content.strip() if isinstance(content, str) and content.strip() else None
-    except (KeyError, IndexError, TypeError, AttributeError):
+    except (TypeError, AttributeError):
         return None
 
 
@@ -124,10 +128,14 @@ def _ask_gemini(key: str, prompt: str, system: str, temp: float, max_tokens: int
     for model in GEMINI_MODELS:
         data = _post(f"{URLS['gemini']}{model}:generateContent?key={key}", payload, tag=f"gemini:{model}")
         try:
-            text = data["candidates"][0]["content"]["parts"][0]["text"]
+            candidates = (data or {}).get("candidates") or []
+            first_cand = next(iter(candidates), {})
+            parts = first_cand.get("content", {}).get("parts") or []
+            first_part = next(iter(parts), {})
+            text = first_part.get("text", "")
             if isinstance(text, str) and text.strip():
                 return text.strip()
-        except (KeyError, IndexError, TypeError, AttributeError):
+        except (TypeError, AttributeError):
             continue
     return None
 
@@ -137,15 +145,16 @@ def _ask_cohere(key: str, prompt: str, system: str, temp: float, max_tokens: int
     payload = {"model": "command-a-03-2025", "messages": _messages(prompt, system), "temperature": temp, "max_tokens": max_tokens}
     data = _post(URLS["cohere"], payload, headers, "cohere")
     try:
-        content = data["message"]["content"]
-        if isinstance(content, list) and content:
-            text = content[0].get("text", "") if isinstance(content[0], dict) else ""
+        content = (data or {}).get("message", {}).get("content")
+        if isinstance(content, list):
+            first_item = next(iter(content), {})
+            text = first_item.get("text", "") if isinstance(first_item, dict) else ""
         elif isinstance(content, dict):
             text = content.get("text", "")
         else:
             text = ""
         return text.strip() if isinstance(text, str) and text.strip() else None
-    except (KeyError, IndexError, TypeError, AttributeError):
+    except (TypeError, AttributeError):
         return None
 
 
@@ -228,10 +237,14 @@ def ai_vision(image_bytes: bytes, mime_type: str, prompt: str, system: str = "")
         for model in GEMINI_MODELS:
             data = _post(f"{URLS['gemini']}{model}:generateContent?key={key}", payload, tag=f"vision:{model}")
             try:
-                text = data["candidates"][0]["content"]["parts"][0]["text"]
+                candidates = (data or {}).get("candidates") or []
+                first_cand = next(iter(candidates), {})
+                parts = first_cand.get("content", {}).get("parts") or []
+                first_part = next(iter(parts), {})
+                text = first_part.get("text", "")
                 if isinstance(text, str) and text.strip():
                     return text.strip()
-            except (KeyError, IndexError, TypeError, AttributeError):
+            except (TypeError, AttributeError):
                 continue
     return None
 
@@ -268,6 +281,7 @@ def ai_generate_image(prompt: str) -> Optional[bytes]:
     except Exception as exc:
         print(f"Fallback Image Err: {exc}", flush=True)
     return None
+
 def ai_ask_json(prompt: str, system: str = "", mode: str = "fast") -> dict[str, Any]:
     strict_system = f"{system}\nأجب بصيغة JSON صالحة فقط بدون أي نص إضافي أو علامات Markdown.".strip()
     raw = ai_ask(prompt, system=strict_system, temperature=0.1, mode=mode, use_cache=False)
@@ -292,97 +306,86 @@ def check_providers_health() -> dict[str, bool]:
     }
 
 
+def _ping_single_key(item: tuple[str, int, str]) -> str:
+    provider, idx, k = item
+    masked = f"{k[:6]}...{k[-4:]}" if len(k) > 10 else "***"
+    try:
+        if provider == "openrouter":
+            r = SESSION.get("https://openrouter.ai", headers={"Authorization": f"Bearer {k}"}, timeout=6)
+            if r.status_code == 200:
+                info = r.json().get("data", {})
+                usage = round(float(info.get("usage", 0)), 4)
+                return f"🌐 OpenRouter #{idx} (`{masked}`): ✅ نشط (مستهلك: ${usage})"
+            return f"🌐 OpenRouter #{idx} (`{masked}`): ❌ خطأ ({r.status_code})"
+
+        elif provider == "gemini":
+            r = SESSION.get(f"{URLS['gemini']}?key={k}", timeout=6)
+            st = "✅ نشط" if r.status_code == 200 else f"❌ خطأ ({r.status_code})"
+            return f"✨ Gemini #{idx} (`{masked}`): {st}"
+
+        elif provider == "groq":
+            r = SESSION.get("https://groq.com", headers={"Authorization": f"Bearer {k}"}, timeout=6)
+            st = "✅ نشط" if r.status_code == 200 else f"❌ خطأ ({r.status_code})"
+            return f"⚡ Groq #{idx} (`{masked}`): {st}"
+
+        elif provider == "samba":
+            r = SESSION.get("https://sambanova.ai", headers={"Authorization": f"Bearer {k}"}, timeout=6)
+            st = "✅ نشط" if r.status_code == 200 else f"❌ خطأ ({r.status_code})"
+            return f"🚀 SambaNova #{idx} (`{masked}`): {st}"
+
+        elif provider == "cohere":
+            r = SESSION.get("https://cohere.com", headers={"Authorization": f"Bearer {k}"}, timeout=6)
+            st = "✅ نشط" if r.status_code == 200 else f"❌ خطأ ({r.status_code})"
+            return f"🧠 Cohere #{idx} (`{masked}`): {st}"
+    except Exception:
+        return f"⚠️ {provider} #{idx} (`{masked}`): تعذر الاتصال"
+    return ""
+
+
 def inspect_api_keys_report() -> str:
-    total_ai_keys = len(GEM_KEYS) + len(GROQ_KEYS) + len(SAMBA_KEYS) + len(COHERE_KEYS) + len(OR_KEYS)
-    lines = [f"🔑 *تقرير فحص مكونات النظام ({total_ai_keys} مفتاح ذكاء اصطناعي + الخدمات):*\n"]
-
-    if OR_KEYS:
-        lines.append(f"🌐 *OpenRouter* ({len(OR_KEYS)}):")
+    try:
+        tasks = []
         for idx, k in enumerate(OR_KEYS, 1):
-            masked = f"{k[:8]}...{k[-4:]}" if len(k) > 12 else "***"
-            try:
-                r = SESSION.get("https://openrouter.ai", headers={"Authorization": f"Bearer {k}"}, timeout=8)
-                if r.status_code == 200:
-                    info = r.json().get("data", {})
-                    limit = info.get("limit")
-                    usage = round(float(info.get("usage", 0)), 4)
-                    bal = f"متبقي: ${round(limit - usage, 3)}" if limit is not None else f"مستهلك: ${usage} (مجاني)"
-                    lines.append(f"  • مفتاح {idx} (`{masked}`): ✅ نشط ({bal})")
-                else:
-                    lines.append(f"  • مفتاح {idx} (`{masked}`): ❌ خطأ ({r.status_code})")
-            except Exception:
-                lines.append(f"  • مفتاح {idx} (`{masked}`): ⚠️ تعذر الاتصال")
-
-    if GEM_KEYS:
-        lines.append(f"\n✨ *Google Gemini* ({len(GEM_KEYS)}):")
+            tasks.append(("openrouter", idx, k))
         for idx, k in enumerate(GEM_KEYS, 1):
-            masked = f"{k[:8]}...{k[-4:]}" if len(k) > 12 else "***"
-            try:
-                r = SESSION.get(f"{URLS['gemini']}?key={k}", timeout=8)
-                status = "✅ نشط ومتاح" if r.status_code == 200 else f"❌ خطأ ({r.status_code})"
-                lines.append(f"  • مفتاح {idx} (`{masked}`): {status}")
-            except Exception:
-                lines.append(f"  • مفتاح {idx} (`{masked}`): ⚠️ تعذر الاتصال")
-
-    if GROQ_KEYS:
-        lines.append(f"\n⚡ *Groq* ({len(GROQ_KEYS)}):")
+            tasks.append(("gemini", idx, k))
         for idx, k in enumerate(GROQ_KEYS, 1):
-            masked = f"{k[:8]}...{k[-4:]}" if len(k) > 12 else "***"
-            try:
-                r = SESSION.get("https://groq.com", headers={"Authorization": f"Bearer {k}"}, timeout=8)
-                status = "✅ نشط ومتاح" if r.status_code == 200 else f"❌ منتهي/خطأ ({r.status_code})"
-                lines.append(f"  • مفتاح {idx} (`{masked}`): {status}")
-            except Exception:
-                lines.append(f"  • مفتاح {idx} (`{masked}`): ⚠️ تعذر الاتصال")
-
-    if SAMBA_KEYS:
-        lines.append(f"\n🚀 *SambaNova* ({len(SAMBA_KEYS)}):")
+            tasks.append(("groq", idx, k))
         for idx, k in enumerate(SAMBA_KEYS, 1):
-            masked = f"{k[:8]}...{k[-4:]}" if len(k) > 12 else "***"
-            try:
-                r = SESSION.get("https://sambanova.ai", headers={"Authorization": f"Bearer {k}"}, timeout=8)
-                status = "✅ نشط ومتاح" if r.status_code == 200 else f"❌ خطأ ({r.status_code})"
-                lines.append(f"  • مفتاح {idx} (`{masked}`): {status}")
-            except Exception:
-                lines.append(f"  • مفتاح {idx} (`{masked}`): ⚠️ تعذر الاتصال")
-
-    if COHERE_KEYS:
-        lines.append(f"\n🧠 *Cohere* ({len(COHERE_KEYS)}):")
+            tasks.append(("samba", idx, k))
         for idx, k in enumerate(COHERE_KEYS, 1):
-            masked = f"{k[:8]}...{k[-4:]}" if len(k) > 12 else "***"
+            tasks.append(("cohere", idx, k))
+
+        lines = [f"🔑 *تقرير فحص النظام ({len(tasks)} مفتاح AI + الخدمات):*\n"]
+
+        if tasks:
+            with ThreadPoolExecutor(max_workers=10) as pool:
+                results = list(pool.map(_ping_single_key, tasks))
+            lines.extend([r for r in results if r])
+        else:
+            lines.append("⚪ لا توجد مفاتيح ذكاء اصطناعي مسجلة.")
+
+        lines.append("\n🛠️ *الخدمات الأساسية:*")
+        if CF_ACCOUNT and CF_TOKEN:
             try:
-                r = SESSION.get("https://cohere.com", headers={"Authorization": f"Bearer {k}"}, timeout=8)
-                status = "✅ نشط ومتاح" if r.status_code == 200 else f"❌ خطأ ({r.status_code})"
-                lines.append(f"  • مفتاح {idx} (`{masked}`): {status}")
+                cf_r = SESSION.get(
+                    f"https://cloudflare.com{CF_ACCOUNT}/tokens/verify",
+                    headers={"Authorization": f"Bearer {CF_TOKEN}"},
+                    timeout=6,
+                )
+                cf_st = "✅ نشط" if cf_r.status_code == 200 else f"❌ خطأ ({cf_r.status_code})"
             except Exception:
-                lines.append(f"  • مفتاح {idx} (`{masked}`): ⚠️ تعذر الاتصال")
+                cf_st = "⚠️ تعذر الاتصال"
+        else:
+            cf_st = "⚪ غير مفعّل"
+        lines.append(f"  • *Cloudflare AI*: {cf_st}")
 
-    lines.append("\n🛠️ *الخدمات والربط الأساسي:*")
-    if CF_ACCOUNT and CF_TOKEN:
-        try:
-            cf_r = SESSION.get(
-                f"https://cloudflare.com{CF_ACCOUNT}/tokens/verify",
-                headers={"Authorization": f"Bearer {CF_TOKEN}"},
-                timeout=8,
-            )
-            cf_st = "✅ نشط" if cf_r.status_code == 200 else f"❌ خطأ مصادقة ({cf_r.status_code})"
-        except Exception:
-            cf_st = "⚠️ تعذر الاتصال"
-    else:
-        cf_st = "⚪ غير مفعّل"
-    lines.append(f"  • *Cloudflare AI (2 vars)*: {cf_st}")
+        sb_st = "✅ مفعّل" if (SB_URL and SB_KEY) else "❌ ناقص"
+        lines.append(f"  • *Supabase DB*: {sb_st}")
 
-    if SB_URL and SB_KEY:
-        try:
-            sb_r = SESSION.get(f"{SB_URL}/rest/v1/", headers={"apikey": SB_KEY}, timeout=8)
-            sb_st = "✅ متصل" if sb_r.status_code in (200, 404) else f"❌ خطأ ({sb_r.status_code})"
-        except Exception:
-            sb_st = "⚠️ تعذر الاتصال"
-    else:
-        sb_st = "⚪ غير مفعّل"
-    lines.append(f"  • *Supabase DB (2 vars)*: {sb_st}")
+        g_st = "✅ مفعّل" if (GREEN_ID and GREEN_TOKEN) else "❌ ناقص"
+        lines.append(f"  • *Green API*: {g_st}")
 
-    g_st = "✅ مفعّل" if (GREEN_ID and GREEN_TOKEN) else "❌ ناقص"
-    lines.append(f"  • *Green API WhatsApp (3 vars)*: {g_st}")
-
-    return "\n".join(lines)
+        return "\n".join(lines)
+    except Exception as exc:
+        return f"⚠️ حدث خطأ أثناء الفحص: {exc}"

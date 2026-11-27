@@ -286,3 +286,63 @@ def check_providers_health() -> dict[str, bool]:
         "cloudflare": bool(CF_ACCOUNT and CF_TOKEN),
         "supabase": bool(SB_URL and SB_KEY),
     }
+
+
+def inspect_api_keys_report() -> str:
+    lines = ["🔑 *تقرير فحص المفاتيح والأرصدة الحية:*\n"]
+
+    # 1. فحص مفاتيح OpenRouter مع الرصيد الفعلي
+    if OR_KEYS:
+        lines.append(f"🌐 *OpenRouter* (عدد المفاتيح: {len(OR_KEYS)}):")
+        for idx, k in enumerate(OR_KEYS, 1):
+            masked = f"{k[:8]}...{k[-4:]}" if len(k) > 12 else "***"
+            try:
+                r = SESSION.get("https://openrouter.ai", headers={"Authorization": f"Bearer {k}"}, timeout=8)
+                if r.status_code == 200:
+                    info = r.json().get("data", {})
+                    limit = info.get("limit")
+                    usage = round(float(info.get("usage", 0)), 4)
+                    bal = f"متبقي: ${round(limit - usage, 3)}" if limit is not None else f"مستهلك: ${usage} (مجاني/غير محدود)"
+                    lines.append(f"  • مفتاح {idx} (`{masked}`): ✅ نشط ({bal})")
+                else:
+                    lines.append(f"  • مفتاح {idx} (`{masked}`): ❌ خطأ ({r.status_code})")
+            except Exception:
+                lines.append(f"  • مفتاح {idx} (`{masked}`): ⚠️ تعذر الاتصال")
+    else:
+        lines.append("🌐 *OpenRouter*: ⚪ لا توجد مفاتيح مضافة")
+
+    # 2. فحص مفاتيح Gemini
+    if GEM_KEYS:
+        lines.append(f"\n✨ *Google Gemini* (عدد المفاتيح: {len(GEM_KEYS)}):")
+        for idx, k in enumerate(GEM_KEYS, 1):
+            masked = f"{k[:8]}...{k[-4:]}" if len(k) > 12 else "***"
+            try:
+                r = SESSION.get(f"{URLS['gemini']}?key={k}", timeout=8)
+                status = "✅ نشط ومتاح" if r.status_code == 200 else f"❌ غير صالح/محظور ({r.status_code})"
+                lines.append(f"  • مفتاح {idx} (`{masked}`): {status}")
+            except Exception:
+                lines.append(f"  • مفتاح {idx} (`{masked}`): ⚠️ تعذر الاتصال")
+    else:
+        lines.append("\n✨ *Google Gemini*: ⚪ لا توجد مفاتيح مضافة")
+
+    # 3. فحص مفاتيح Groq
+    if GROQ_KEYS:
+        lines.append(f"\n⚡ *Groq* (عدد المفاتيح: {len(GROQ_KEYS)}):")
+        for idx, k in enumerate(GROQ_KEYS, 1):
+            masked = f"{k[:8]}...{k[-4:]}" if len(k) > 12 else "***"
+            try:
+                r = SESSION.get("https://groq.com", headers={"Authorization": f"Bearer {k}"}, timeout=8)
+                status = "✅ نشط ومتاح" if r.status_code == 200 else f"❌ منتهي/خطأ ({r.status_code})"
+                lines.append(f"  • مفتاح {idx} (`{masked}`): {status}")
+            except Exception:
+                lines.append(f"  • مفتاح {idx} (`{masked}`): ⚠️ تعذر الاتصال")
+    else:
+        lines.append("\n⚡ *Groq*: ⚪ لا توجد مفاتيح مضافة")
+
+    # 4. فحص مفاتيح Cohere و SambaNova و Cloudflare
+    lines.append(f"\n🧠 *Cohere*: {len(COHERE_KEYS)} مفاتيح مسجلة")
+    lines.append(f"🚀 *SambaNova*: {len(SAMBA_KEYS)} مفاتيح مسجلة")
+    lines.append(f"☁️ *Cloudflare AI*: {'✅ مفعّل' if (CF_ACCOUNT and CF_TOKEN) else '⚪ غير مفعّل'}")
+
+    return "\n".join(lines)
+

@@ -111,8 +111,6 @@ def _extract_chart_metrics(rows: list[list[Any]]) -> tuple[list[str], list[float
     avg_val = round(sum(values) / len(values), 1) if values else 0.0
     max_val = max(values) if values else 0.0
     return labels, values, avg_val, max_val
-
-
 @app.route("/board/<int:bid>", methods=["GET", "POST"])
 def live_board(bid: int):
     record = _get_record(bid)
@@ -185,8 +183,6 @@ def live_board(bid: int):
         }});
       </script>
     </body></html>"""
-
-
 @app.route("/board/<int:bid>/export")
 def export_board(bid: int):
     record = _get_record(bid)
@@ -231,7 +227,24 @@ def live_site(sid: int):
         "<form method='POST' style='display:flex;gap:8px;width:100%;margin:0;'>"
         "<input name='edit_req' placeholder='اكتب أي تعديل على تصميم الموقع أو ألوانه ومحتواه ليتم تطبيقه فورا...' "
         "style='flex:1;padding:8px 12px;border-radius:8px;border:1px solid #475569;background:#020617;color:#fff;font-size:13px;' required>"
-        "<button type='submit' style='background:#0284c7;color:#fff;border:none;padding:8px
+        "<button type='submit' style='background:#0284c7;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-weight:bold;cursor:pointer;font-size:13px;'>⚡ تعديل</button>"
+        "</form></div>"
+    )
+    if "</body>" in html_code:
+        return html_code.replace("</body>", f"{edit_bar}</body>")
+    return html_code + edit_bar
+
+
+@app.route("/kpi")
+def kpi_dashboard():
+    logs = sb("GET", "kpi_logs", q="?order=id.desc&limit=50") or []
+    if not isinstance(logs, list):
+        logs = []
+    rows_html = "".join(
+        f"<tr class='border-b border-slate-800'><td class='p-3'>{r.get('id', '')}</td><td class='p-3'>{r.get('user_role', '')}</td>"
+        f"<td class='p-3'>{r.get('module_name', '')}</td><td class='p-3'>{r.get('response_time', '')}s</td><td class='p-3'>{r.get('quality_tag', '')}</td></tr>"
+        for r in logs
+    )
     return f"""<!DOCTYPE html><html dir='rtl' lang='ar'><head><meta charset='utf-8'><title>سجل الأداء</title>
     <script src='{TW_CDN}'></script><link href='{GF_CDN}' rel='stylesheet'></head>
     <body style="font-family:'Cairo',sans-serif" class='bg-slate-950 text-white p-6 max-w-6xl mx-auto'>
@@ -240,8 +253,6 @@ def live_site(sid: int):
     <table class='w-full text-right'><thead class='bg-slate-950 text-slate-300 text-xs'>
     <tr><th class='p-3'>#</th><th class='p-3'>المستخدم</th><th class='p-3'>الوحدة</th><th class='p-3'>الزمن</th><th class='p-3'>الجودة</th></tr>
     </thead><tbody>{rows_html}</tbody></table></div></body></html>"""
-
-
 @app.route("/health", methods=["GET"])
 def health_check():
     return jsonify({"status": "healthy", "audit_chain": AUDIT_LEDGER.verify_integrity()}), 200
@@ -471,12 +482,11 @@ def _build_live_site(cid: str, task: str) -> None:
     sid = rec.get("id", 1) if isinstance(rec, dict) else 1
     site_link = f"{RENDER_URL}/site/{sid}" if RENDER_URL else f"/site/{sid}"
     send_msg(cid, f"🌐 *تم تصميم وإطلاق الموقع بنجاح!*\n\n🔗 *رابط الموقع المباشر (مع أداة التعديل الفوري أسفل الصفحة):*\n{site_link}\n\n💡 يمكنك أيضا كتابة `تعديل: [وصف التعديل]` هنا في المحادثة لإعادة بنائه.")
-
-
 def _push_to_github(cid: str, task: str) -> None:
     if not GITHUB_TOKEN:
         send_msg(cid, "⚠️ للرفع التلقائي على GitHub، أضف متغير `GITHUB_TOKEN` في إعدادات Render أولا، أو اطلب الكود وسأجهزه لك مباشرة.")
         return
+
     send_msg(cid, "📦 جاري تجهيز الملفات البرمجية ورفعها إلى حسابك في GitHub...")
     repo_name = f"project-{int(time.time())}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}

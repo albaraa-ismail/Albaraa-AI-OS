@@ -1,5 +1,5 @@
 import time
-from core.core_ai import ai_ask, send_msg
+from core.core_ai import ai_ask, ai_ask_json, send_msg
 from core.event_bus import BUS
 from intelligence.builder_agent import BuilderAgent
 from intelligence.learning_agent import QualityReviewerAgent
@@ -8,7 +8,8 @@ from intelligence.ml_intent_anomaly import INTENT_CLASSIFIER
 from intelligence.research_agent import ResearchAgent
 from intelligence.rl_router import RL_ROUTER
 from multimodal.arabic_nlp import normalize_arabic_dialect, polish_human_style
-from multimodal.office_tools import make_live_powerbi
+from multimodal.office_tools import make_excel, make_live_powerbi, make_pptx, make_word
+from multimodal.pro_capabilities import make_pdf_report
 from security.audit_ledger import AUDIT_LEDGER
 from security.iam_gateway import IAM_GATEWAY
 from security.safe_guard import apply_saudi_governance, inspect_prompt_injection
@@ -57,12 +58,40 @@ class ChiefOrchestrator:
         if research_brief:
             body += f"\n\nمخرجات الوكيل الباحث:\n{self._compress_context(research_brief, 1200)}"
         return ai_ask(body, sys_prompt, temperature=0.2, mode="agent_fast", max_tokens=600)
+
+    def _auto_produce_deliverables(self, cid: str, requirements: str, plan_or_answer: str) -> list[str]:
+        judge_prompt = (
+            "حلل المتطلبات التالية وحدد جميع الملفات أو الأنظمة الملموسة المطلوب تسليمها في المشروع.\n"
+            "اختر من القائمة فقط: word, excel, pptx, pdf, dashboard\n"
+            'أرجع JSON فقط بهذا الشكل: {"deliverables": ["word", ...], "topic": "عنوان المشروع المختصر"}\n\n'
+            f"المتطلبات:\n{self._compress_context(requirements, 1500)}"
+        )
+        decision = ai_ask_json(judge_prompt, "أنت مدير مشاريع تقني تحدد مخرجات التسليم بدقة.", mode="agent_fast")
+        items = decision.get("deliverables") if isinstance(decision, dict) else []
+        topic = str(decision.get("topic") or requirements[:60]).strip()
+        if not isinstance(items, list) or not items:
+            return []
+
+        rich_task = f"{topic}\n\nالمتطلبات والتفاصيل المعتمدة:\n{self._compress_context(plan_or_answer, 2200)}"
+        produced: list[str] = []
+        builders = {
+            "word": ("مستند Word", lambda: make_word(cid, rich_task)),
+            "pdf": ("تقرير PDF", lambda: make_pdf_report(cid, rich_task)),
+            "excel": ("ملف Excel", lambda: make_excel(cid, rich_task)),
+            "pptx": ("عرض PowerPoint", lambda: make_pptx(cid, rich_task)),
+            "dashboard": ("لوحة قيادة حية", lambda: make_live_powerbi(cid, rich_task)),
+        }
+        for key in dict.fromkeys(str(x).lower().strip() for x in items):
+            if key in builders:
+                label, fn = builders[key]
+                fn()
+                produced.append(label)
+        return produced
     def _run_collaborative_pipeline(self, normalized: str, intent: str, chosen_agent: str, memory_ctx: str) -> tuple[str, list[str]]:
         active_agents: list[str] = []
         compact_mem = self._compress_context(memory_ctx, 1400)
         research_findings = ""
 
-        # المرحلة 1: الوكيل الباحث يجمع حقائق السوق والأنظمة المحدثة عند الحاجة
         if self._needs_market_research(normalized, intent) or chosen_agent == "research":
             active_agents.append("ResearchAgent")
             query_with_ctx = f"{normalized}\n\nسياق ذو صلة:\n{compact_mem}" if compact_mem else normalized
@@ -70,16 +99,20 @@ class ChiefOrchestrator:
             if intent == "research" and len(normalized) < 80 and not any(w in normalized for w in ("صمم", "ابني", "اكتب", "خطة", "دراسة", "كود")):
                 return research_findings, active_agents
 
-        # المرحلة 2: المنسق الأعلى يضع خطة التنفيذ باستخدام النموذج الخفيف المجاني
         plan = ""
         if len(normalized) > 60 or research_findings:
             active_agents.append("PlannerAgent")
             plan = self.build_execution_plan(normalized, intent, research_findings)
 
-        # المرحلة 3: الوكيل المنفذ (المبرمج أو العقل المدبر التنفيذي) يبني الحل المتكامل
         if chosen_agent == "code" or intent == "code":
             active_agents.append("BuilderAgent")
-            combined_ctx = "\n\n".join(p for p in (compact_mem, f"معطيات البحث:\n{self._compress_context(research_findings, 1500)}" if research_findings else "", f"خطة التنفيذ:\n{plan}" if plan else "") if p)
+            combined_ctx = "\n\n".join(
+                p for p in (
+                    compact_mem,
+                    f"معطيات البحث:\n{self._compress_context(research_findings, 1500)}" if research_findings else "",
+                    f"خطة التنفيذ:\n{plan}" if plan else "",
+                ) if p
+            )
             raw_answer = self.builder.build_solution(normalized, context=combined_ctx)
         else:
             active_agents.append("ExecutiveAgent")
@@ -98,7 +131,6 @@ class ChiefOrchestrator:
 
             raw_answer = ai_ask("\n\n".join(sections), sys_prompt, temperature=0.35, mode="agent_deep", max_tokens=3000)
 
-        # المرحلة 4: وكيل التدقيق والجودة يراجع المخرج النهائي (دورة واحدة لحفظ الرصيد)
         if intent != "code" and len(raw_answer) > 750 and "⚠️" not in raw_answer:
             active_agents.append("QualityReviewerAgent")
             raw_answer = self.reviewer.review_and_refine(normalized, raw_answer)
@@ -165,6 +197,9 @@ class ChiefOrchestrator:
 
             if notify_whatsapp:
                 send_msg(cid, final_answer)
+                built_files = self._auto_produce_deliverables(cid, normalized, final_answer)
+                if built_files:
+                    send_msg(cid, f"📦 *تم تجهيز وإرسال جميع المخرجات المطلوبة تلقائياً:* {' + '.join(built_files)}")
             return final_answer
 
         except Exception as exc:

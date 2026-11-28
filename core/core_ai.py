@@ -14,25 +14,28 @@ from core.failover_cache import SMART_CACHE, FAILOVER
 from core.event_bus import BUS
 
 SESSION = requests.Session()
-SESSION.headers.update({"User-Agent": "Albaraa-AI-OS/4.1"})
-DEFAULT_TIMEOUT = 22
+SESSION.headers.update({"User-Agent": "Albaraa-AI-OS/4.2-Agents"})
+DEFAULT_TIMEOUT = 25
 
 GEMINI_BASE_URL = URLS["gemini"]
 GEM_KEY = next(iter(GEM_KEYS), "")
 _rotated = rotated_keys
 
 MODE_ROUTING: dict[str, list[str]] = {
-    "arabic": ["gemini", "groq", "samba", "cohere", "openrouter", "cloudflare"],
-    "fast": ["groq", "samba", "gemini", "openrouter", "cloudflare"],
-    "general": ["gemini", "groq", "samba", "cohere", "openrouter", "cloudflare"],
-    "reasoning": ["gemini", "samba", "groq", "openrouter", "cohere"],
-    "coding": ["groq", "samba", "openrouter", "gemini", "cloudflare"],
-    "office": ["gemini", "groq", "samba", "cohere", "openrouter"],
+    "agent_fast": ["groq_fast", "groq", "samba", "gemini"],
+    "agent_deep": ["gemini", "samba", "groq", "cohere"],
+    "arabic": ["gemini", "groq", "samba", "cohere"],
+    "fast": ["groq_fast", "groq", "samba", "gemini"],
+    "general": ["gemini", "groq", "samba", "cohere"],
+    "reasoning": ["gemini", "samba", "groq", "cohere"],
+    "coding": ["groq", "samba", "gemini"],
+    "office": ["gemini", "groq", "samba", "cohere"],
 }
 
 GEMINI_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest")
 
 OPENAI_COMPAT: dict[str, tuple[str, str]] = {
+    "groq_fast": (URLS["groq_chat"], "llama-3.1-8b-instant"),
     "groq": (URLS["groq_chat"], "llama-3.3-70b-versatile"),
     "samba": (URLS.get("samba", "https://sambanova.ai"), "Meta-Llama-3.3-70B-Instruct"),
     "openrouter": (URLS["openrouter"], "openrouter/free"),
@@ -40,6 +43,7 @@ OPENAI_COMPAT: dict[str, tuple[str, str]] = {
 
 KEY_POOLS: dict[str, list[str]] = {
     "gemini": GEM_KEYS,
+    "groq_fast": GROQ_KEYS,
     "groq": GROQ_KEYS,
     "samba": SAMBA_KEYS,
     "cohere": COHERE_KEYS,
@@ -88,6 +92,7 @@ def send_msg(chat_id: str, text: str) -> Optional[dict[str, Any]]:
         print(f"WA Conn Err: {exc}", flush=True)
     return None
 
+
 def _messages(prompt: str, system: str) -> list[dict[str, str]]:
     return ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
 
@@ -101,8 +106,6 @@ def _post(url: str, payload: dict[str, Any], headers: Optional[dict[str, str]] =
     except Exception as exc:
         print(f"Conn Err [{tag}]: {exc}", flush=True)
     return None
-
-
 def _ask_openai_compat(provider: str, key: str, prompt: str, system: str, temp: float, max_tokens: int) -> Optional[str]:
     url, model = OPENAI_COMPAT[provider]
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
@@ -206,7 +209,6 @@ def ai_ask(
     for provider in providers:
         if hasattr(FAILOVER, "is_available") and not FAILOVER.is_available(provider):
             continue
-
         reply = _call_provider(provider, prompt, system, temperature, max_tokens)
         if reply:
             if hasattr(FAILOVER, "record_success"):
@@ -252,14 +254,13 @@ def ai_vision(image_bytes: bytes, mime_type: str, prompt: str, system: str = "")
 def ai_generate_image(prompt: str) -> Optional[bytes]:
     translated = ai_ask(
         f"Convert this description into a clean, professional English image prompt (max 35 words, no extra text): {prompt}",
-        mode="fast",
+        mode="agent_fast",
         use_cache=False,
     )
     en_prompt = prompt if "عذراً، جميع محركات" in translated else translated
 
     if CF_ACCOUNT and CF_TOKEN:
-        cf_base = "https://cloudflare.com"
-        url = f"{cf_base}/{CF_ACCOUNT}/ai/run/@cf/black-forest-labs/flux-1-schnell"
+        url = f"https://cloudflare.com{CF_ACCOUNT}/ai/run/@cf/black-forest-labs/flux-1-schnell"
         try:
             res = SESSION.post(url, headers={"Authorization": f"Bearer {CF_TOKEN}"}, json={"prompt": en_prompt}, timeout=30)
             if res.status_code == 200 and res.content:
@@ -282,7 +283,8 @@ def ai_generate_image(prompt: str) -> Optional[bytes]:
         print(f"Fallback Image Err: {exc}", flush=True)
     return None
 
-def ai_ask_json(prompt: str, system: str = "", mode: str = "fast") -> dict[str, Any]:
+
+def ai_ask_json(prompt: str, system: str = "", mode: str = "agent_fast") -> dict[str, Any]:
     strict_system = f"{system}\nأجب بصيغة JSON صالحة فقط بدون أي نص إضافي أو علامات Markdown.".strip()
     raw = ai_ask(prompt, system=strict_system, temperature=0.1, mode=mode, use_cache=False)
     match = re.search(r"\{.*\}", raw, re.DOTALL)
@@ -304,8 +306,6 @@ def check_providers_health() -> dict[str, bool]:
         "supabase": bool(SB_URL and SB_KEY),
         "green_api": bool(GREEN_ID and GREEN_TOKEN),
     }
-
-
 def _ping_single_key(item: tuple[str, int, str]) -> str:
     provider, idx, k = item
     masked = f"{k[:6]}...{k[-4:]}" if len(k) > 10 else "***"

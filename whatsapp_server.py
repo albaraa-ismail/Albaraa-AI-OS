@@ -123,7 +123,6 @@ def live_board(bid: int):
     cols = board.get("cols", ["البند", "القسم", "المحقق", "المستهدف", "الحالة"])
     rows = board.get("rows", [])
     ai_reply = ""
-
     if request.method == "POST":
         cols, rows, ai_reply = _handle_board_post(board, cols, rows)
         board["cols"], board["rows"] = cols, rows
@@ -232,23 +231,7 @@ def live_site(sid: int):
         "<form method='POST' style='display:flex;gap:8px;width:100%;margin:0;'>"
         "<input name='edit_req' placeholder='اكتب أي تعديل على تصميم الموقع أو ألوانه ومحتواه ليتم تطبيقه فورا...' "
         "style='flex:1;padding:8px 12px;border-radius:8px;border:1px solid #475569;background:#020617;color:#fff;font-size:13px;' required>"
-        "<button type='submit' style='background:#0284c7;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-weight:bold;cursor:pointer;font-size:13px;'>تحديث الصفحة</button>"
-        "<button type='button' onclick=\"document.getElementById('live-editor-bar').style.display='none'\" "
-        "style='background:#334155;color:#cbd5e1;border:none;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:12px;'>إخفاء</button>"
-        "</form></div>"
-    )
-    return f"{html_code}\n{edit_bar}"
-
-
-@app.route("/timeline", methods=["GET"])
-def performance_timeline():
-    kpis = sb("GET", "telemetry_kpis", q="?order=id.desc&limit=30") or []
-    rows_html = "".join(
-        f"<tr class='border-b border-slate-800'><td class='p-3'>{k.get('id', '')}</td><td class='p-3'>{k.get('user_role', '')}</td>"
-        f"<td class='p-3'>{k.get('unit_used', '')}</td><td class='p-3'>{k.get('response_time_sec', '')}s</td>"
-        f"<td class='p-3'>{k.get('user_growth_score', '')}%</td></tr>"
-        for k in kpis if isinstance(k, dict)
-    )
+        "<button type='submit' style='background:#0284c7;color:#fff;border:none;padding:8px
     return f"""<!DOCTYPE html><html dir='rtl' lang='ar'><head><meta charset='utf-8'><title>سجل الأداء</title>
     <script src='{TW_CDN}'></script><link href='{GF_CDN}' rel='stylesheet'></head>
     <body style="font-family:'Cairo',sans-serif" class='bg-slate-950 text-white p-6 max-w-6xl mx-auto'>
@@ -257,6 +240,8 @@ def performance_timeline():
     <table class='w-full text-right'><thead class='bg-slate-950 text-slate-300 text-xs'>
     <tr><th class='p-3'>#</th><th class='p-3'>المستخدم</th><th class='p-3'>الوحدة</th><th class='p-3'>الزمن</th><th class='p-3'>الجودة</th></tr>
     </thead><tbody>{rows_html}</tbody></table></div></body></html>"""
+
+
 @app.route("/health", methods=["GET"])
 def health_check():
     return jsonify({"status": "healthy", "audit_chain": AUDIT_LEDGER.verify_integrity()}), 200
@@ -373,8 +358,6 @@ def _handle_admin_commands(cid: str, clean: str) -> bool:
                 handler(int(pid_str))
             return True
     return False
-
-
 def _dispatch_smart(cid: str, txt: str, sname: str, is_admin: bool = False, from_voice: bool = False) -> None:
     clean = txt.strip()
     user_tag = sname.strip() if sname and sname.strip() != "User" else ("admin" if is_admin else "partner")
@@ -494,7 +477,6 @@ def _push_to_github(cid: str, task: str) -> None:
     if not GITHUB_TOKEN:
         send_msg(cid, "⚠️ للرفع التلقائي على GitHub، أضف متغير `GITHUB_TOKEN` في إعدادات Render أولا، أو اطلب الكود وسأجهزه لك مباشرة.")
         return
-
     send_msg(cid, "📦 جاري تجهيز الملفات البرمجية ورفعها إلى حسابك في GitHub...")
     repo_name = f"project-{int(time.time())}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
@@ -509,11 +491,13 @@ def _push_to_github(cid: str, task: str) -> None:
     b64_code = base64.b64encode(code_content.encode("utf-8")).decode("utf-8")
     requests.put(f"{GITHUB_API}/repos/{full_name}/contents/index.html", headers=headers, json={"message": "Initial commit", "content": b64_code}, timeout=15)
     send_msg(cid, f"✅ *تم إنشاء المستودع ورفع المشروع على GitHub بنجاح:*\n{html_url}")
+
+
 BOT_PREFIXES = (
     "🔍", "⚙️", "🛡️", "📑", "🌐", "🚀", "💻", "⚠", "✅", "🤖", "📊", "📄", "📽️", "🎨",
     "👥", "💡", "🧠", "🎙", "📚", "🔄", "📌", "📦", "🛍️", "🏗️", "⚖️", "🧾", "🔬", "❌", "↩️",
 )
-VALID_WEBHOOKS = {"incomingMessageReceived", "outgoingMessageReceived"}
+VALID_WEBHOOKS = {"incomingMessageReceived", "outgoingMessageReceived", "outgoingAPIMessageReceived"}
 MEDIA_TYPES = {"audioMessage", "imageMessage", "documentMessage"}
 EXPORT_KEYWORDS = ("وورد", "اكسل", "إكسل", "بوربوينت", "باور بي", "pdf", "تقرير", "لوحة", "لخص")
 
@@ -553,14 +537,21 @@ def webhook():
         return jsonify({"status": "ignored"}), 200
 
     sdata = data.get("senderData") or {}
-    cid, sender = sdata.get("chatId", ""), sdata.get("sender", "")
-    if not _is_authorized(cid, sender):
-        return jsonify({"status": "unauthorized"}), 200
-
-    is_admin = _is_owner(cid, sender)
-    mdata = data.get("messageData") or {}
+    cid = str(sdata.get("chatId", "")).strip()
+    sender = str(sdata.get("sender", "")).strip()
     sname = sdata.get("senderName", "User")
 
+    is_self_outgoing = wtype in ("outgoingMessageReceived", "outgoingAPIMessageReceived")
+    is_admin = _is_owner(cid, sender) or is_self_outgoing
+
+    in_allowed_grp = _is_in_allowed_group(cid)
+    authorized = is_admin or (in_allowed_grp and _is_authorized(cid, sender))
+
+    if not authorized:
+        print(f"[IGNORED UNAUTHORIZED] wtype={wtype} cid={cid} sender={sender}", flush=True)
+        return jsonify({"status": "unauthorized"}), 200
+
+    mdata = data.get("messageData") or {}
     if mdata.get("typeMessage") in MEDIA_TYPES:
         EXECUTOR.submit(safe_run, _handle_media_message, cid, mdata, sname, is_admin)
         return jsonify({"status": "media_queued"}), 200
@@ -574,7 +565,7 @@ def webhook():
             send_msg(cid, "🛡️ تم حظر هذا الطلب لمخالفته ضوابط الأمن السيبراني والحوكمة.")
             return jsonify({"status": "security_blocked"}), 200
 
-        EXECUTOR.submit(_dispatch_smart, cid, txt, sname, is_admin)
+        EXECUTOR.submit(safe_run, _dispatch_smart, cid, txt, sname, is_admin)
 
     return jsonify({"status": "ok"}), 200
 

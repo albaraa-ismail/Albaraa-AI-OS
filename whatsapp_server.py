@@ -505,11 +505,12 @@ def _push_to_github(cid: str, task: str) -> None:
 
 BOT_PREFIXES = (
     "🔍", "⚙️", "🛡️", "📑", "🌐", "🚀", "💻", "⚠", "✅", "🤖", "📊", "📄", "📽️", "🎨",
-    "👥", "💡", "🧠", "🎙", "📚", "🔄", "📌", "📦", "🛍️", "🏗️", "⚖️", "🧾", "🔬", "❌", "↩️",
+    "👥", "💡", "🧠", "🎙", "📚", "🔄", "📌", "📦", "🛍️", "🏗️", "⚖️", "🧾", "🔬", "❌", "↩️", "👁️",
 )
 VALID_WEBHOOKS = {"incomingMessageReceived", "outgoingMessageReceived", "outgoingAPIMessageReceived"}
 MEDIA_TYPES = {"audioMessage", "imageMessage", "documentMessage"}
 EXPORT_KEYWORDS = ("وورد", "اكسل", "إكسل", "بوربوينت", "باور بي", "pdf", "تقرير", "لوحة", "لخص")
+PROJECT_REQ_TRIGGERS = ("متطلبات", "مشروع", "نفذ", "جهز", "اعتمد", "ابني", "صمم", "تخرج", "كاملة", "كامله")
 
 
 def _handle_media_message(cid: str, mdata: dict[str, Any], sname: str, is_admin: bool = False) -> None:
@@ -532,9 +533,20 @@ def _handle_media_message(cid: str, mdata: dict[str, Any], sname: str, is_admin:
             send_msg(cid, "⚠️ تعذر فهم الرسالة الصوتية، يرجى إعادة الإرسال.")
         return
 
+    send_msg(cid, "👁️ جاري قراءة وتحليل المرفق بدقة واستخراج كافة المتطلبات...")
     analysis = read_media_from_url(dl_url, mime, caption)
-    if caption and any(k in caption.lower() for k in EXPORT_KEYWORDS):
-        _dispatch_smart(cid, f"{caption}\n\nالبيانات المستخرجة من المرفق:\n{analysis}", sname, is_admin)
+    low_cap = caption.lower()
+
+    if caption and (any(k in low_cap for k in PROJECT_REQ_TRIGGERS) or any(k in low_cap for k in EXPORT_KEYWORDS)):
+        user_tag = sname.strip() if sname and sname.strip() != "User" else ("admin" if is_admin else "partner")
+        full_brief = (
+            f"توجيه المالك: {caption}\n\n"
+            f"المتطلبات المستخرجة من المرفق:\n{analysis}\n\n"
+            "المطلوب: نفذ جميع عناصر ومتطلبات المشروع بدقة احترافية وجهز كل الملفات والمخرجات المذكورة فيه."
+        )
+        if any(k in low_cap for k in ("موقع", "صفحة هبوط", "ويب")) or "موقع" in analysis.lower():
+            _build_live_site(cid, full_brief)
+        run_task(cid, full_brief, user_tag, sname, notify_whatsapp=True)
     else:
         send_msg(cid, analysis)
 
